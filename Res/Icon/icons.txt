@@ -1,0 +1,8 @@
+#Write .cs Script name and relative path like
+#ProxyMesh: ~icon.png
+ProxyMesh: ~icon.png
+ProxyChildMesh: ~icon.png
+ProxyMeshAbstract: ~icon.png
+ProxyRegistrationCollider: ~icon_collider.png
+ProxyRegistrationRigidbody: ~icon_collider.png
+ProxyMeshDeformation: ~icon_deformation.png
