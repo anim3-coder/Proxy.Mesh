@@ -9,37 +9,46 @@ namespace Proxy.Mesh
 {
     [TriInspector.DeclareFoldoutGroup("Main")]
     [TriInspector.DeclareFoldoutGroup("Extrusion")]
-    public class ProxyMapDeformation : ExternalFeature
+    public class ProxyMapDeformation : ExternalFeature, IDeformationMap
     {
         [SerializeField, TriInspector.Group("Main")] private int textureSize = 64;
         [SerializeField, TriInspector.Group("Main")] private float maxDeformation = 0.5f;
         [SerializeField, TriInspector.Group("Main"), TriInspector.Required(FixAction = nameof(FixTarget), FixActionName = "Fix")] private Collider[] colliders;
-        [SerializeField, TriInspector.Group("Main")] private Material targetMaterial;
         [SerializeField, TriInspector.Group("Main")] private string texturePropertyName = "_VectorDisplacementMap";
-        [SerializeField, TriInspector.Group("Main")] private string normalMapPropertyName = "_NormalDisplacementMap";
         [TriInspector.EnumToggleButtons, TriInspector.Group("Main")] public DeformationType deformationType;
         [TriInspector.Group("Main"), TriInspector.Slider(0.0001f, 1)] public float damping = 1;
         [TriInspector.EnumToggleButtons, TriInspector.Group("Extrusion")] public ExtrusionType extrusionType;
         [TriInspector.EnableIf(nameof(IsExtrusion)), TriInspector.Group("Extrusion")] public float extrusionRadius = 5;
         [TriInspector.EnableIf(nameof(IsExtrusion)), TriInspector.Group("Extrusion")] public float extrusionSmooth = 100;
         [TriInspector.ShowInInspector, TriInspector.ReadOnly] public int activeCount { get; protected set; }
-        [SerializeField] private Texture2D deformTexture;
-        [SerializeField] private Texture2D normalMap;
+        [SerializeField] private Texture2D[] deformTextures;
         public bool IsExtrusion => extrusionType != ExtrusionType.None;
         public int totalPixels => textureSize * textureSize;
 
-        private NativeArray<float3> deformation;
-        private NativeArray<int> count;
+        private NativeArray<float3>[] deformation;
+        private NativeArray<int>[] count;
+        private NativeArray<Color>[] colorData;
+
+        public NativeArray<Color>[] maps => colorData;
+
         private NativeArray<DeformInfo> deforms;
-        private NativeArray<Color> colorData;
         public override void OnInit(ProxyMesh proxyMesh)
         {
             base.OnInit(proxyMesh);
-            CreateEmptyTexture();
 
-            deformation = new NativeArray<float3>(totalPixels, Allocator.Persistent);
-            count = new NativeArray<int>(totalPixels, Allocator.Persistent);
-            colorData = new NativeArray<Color>(totalPixels, Allocator.Persistent);
+            deformation = new NativeArray<float3>[proxy.subMeshCount];
+            count = new NativeArray<int>[proxy.subMeshCount];
+            colorData = new NativeArray<Color>[proxy.subMeshCount];
+            deformTextures = new Texture2D[proxy.subMeshCount];
+
+            for (int i = 0; i < proxy.subMeshCount; i++)
+            {
+                deformation[i] = new NativeArray<float3>(totalPixels, Allocator.Persistent);
+                count[i] = new NativeArray<int>(totalPixels, Allocator.Persistent);
+                colorData[i] = new NativeArray<Color>(totalPixels, Allocator.Persistent);
+                deformTextures[i] = CreateEmptyTexture(deformTextures[i]);
+            }
+
             deforms = new NativeArray<DeformInfo>(colliders.Length, Allocator.Persistent);
         }
 
@@ -49,20 +58,21 @@ namespace Proxy.Mesh
                 colliders[i] = colliders[i].gameObject.GetComponent<Collider>();
         }
 
-        private void CreateEmptyTexture()
+        private Texture2D CreateEmptyTexture(Texture2D texture)
         {
-            if (deformTexture != null) Destroy(deformTexture);
-            deformTexture = new Texture2D(textureSize, textureSize, TextureFormat.RGBAFloat, false, true);
-            deformTexture.wrapMode = TextureWrapMode.Clamp;
-            deformTexture.filterMode = FilterMode.Bilinear;
+            if (texture != null) Destroy(texture);
+            texture = new Texture2D(textureSize, textureSize, TextureFormat.RGBAFloat, false, true);
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
 
             // Заполняем нейтральным цветом (0.5 → смещение 0)
             var empty = new NativeArray<Color>(totalPixels, Allocator.Temp);
             for (int i = 0; i < empty.Length; i++)
                 empty[i] = new Color(0.5f, 0.5f, 0.5f, 1f);
-            deformTexture.SetPixelData(empty, 0);
-            deformTexture.Apply();
+            texture.SetPixelData(empty, 0);
+            texture.Apply();
             empty.Dispose();
+            return texture;
         }
 
         public override void OnJobComplete()
@@ -80,79 +90,107 @@ namespace Proxy.Mesh
             }
             activeCount = a;
 
-            // Пересоздаём текстуру, если размер изменился
-            if (deformTexture == null || deformTexture.width != textureSize || deformTexture.height != textureSize)
+            for(int i = 0; i < proxy.subMeshCount; i++)
             {
-                OnShutdown(proxy);
-                OnInit(proxy);
+                UpdateTexture(proxy.materials[i], deformTextures[i], colorData[i]);
             }
 
-            // Копируем данные в текстуру
-            deformTexture.SetPixelData(colorData, 0);
-            deformTexture.Apply();
+            void UpdateTexture(Material mat, Texture2D texture, NativeArray<Color> colorData)
+            {
+                if (texture == null || texture.width != textureSize || texture.height != textureSize)
+                {
+                    OnShutdown(proxy);
+                    OnInit(proxy);
+                }
+                else
+                {
+                    texture.SetPixelData(colorData, 0);
+                    texture.Apply();
 
-            if (targetMaterial != null && targetMaterial.HasProperty(texturePropertyName))
-                targetMaterial.SetTexture(texturePropertyName, deformTexture);
+                    if (mat != null && mat.HasProperty(texturePropertyName))
+                        mat.SetTexture(texturePropertyName, texture);
+                }
+            }
         }
 
         public override void OnShutdown(ProxyMesh proxyMesh)
         {
             base.OnShutdown(proxyMesh);
 
-            if (deformation.IsCreated) deformation.Dispose();
-            if (count.IsCreated) count.Dispose();
+            for (int i = 0; i < proxy.subMeshCount; i++)
+            {
+                deformation[i].Dispose();
+                count[i].Dispose();
+                colorData[i].Dispose();
+            }
             if (deforms.IsCreated) deforms.Dispose();
-            if (colorData.IsCreated) colorData.Dispose();
         }
 
         public override JobHandle StartJob(JobHandle dependsOn)
         {
             if (colliders.Length > 0 && this.enabled)
             {
-                dependsOn = new ClearArraysJob
+                for (int i = 0; i < proxy.subMeshCount; i++)
                 {
-                    colorData = colorData,
-                    count = count,
-                }.Schedule(totalPixels, 64, dependsOn);
-
-                int t = proxy.triangles.Length / 3;
-                dependsOn = new RasterizeTrianglesJob
-                {
-                    triangles = proxy.triangles,
-                    uvs = proxy.nativeUV,
-                    vertices = proxy.animatedVertices,
-                    normals = proxy.animatedNormals,
-                    textureSize = textureSize,
-                    deformation = deformation,
-                    count = count,
-                    localToWorldMatrix = proxy.transform.localToWorldMatrix,
-                    worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
-                    deformInfos = deforms,
-                    extrusionRadius = extrusionRadius,
-                    extrusionSmooth = extrusionSmooth,
-                    deformationType = deformationType,
-                    extrusionType = extrusionType,
-                    damping = damping,
-                    maxDeformation = float.MaxValue,
-
-                }.Schedule(t, 32, dependsOn);
-
-                dependsOn = new FinalizeTextureJob
-                {
-                    deformation = deformation,
-                    count = count,
-                    outputColors = colorData,
-                    maxDeformation = maxDeformation
-                }.Schedule(totalPixels, 64, dependsOn);
+                    dependsOn = StartJob(dependsOn, colorData[i], count[i], deformation[i], proxy.subMeshTriangles[i]);
+                }
             }
             return dependsOn;
         }
+
+        protected JobHandle StartJob(JobHandle dependsOn,
+                                  NativeArray<Color> colorData,
+                                  NativeArray<int> count,
+                                  NativeArray<float3> deformation,
+                                  NativeArray<int> triangles)
+        {
+            dependsOn = new ClearArraysJob
+            {
+                colorData = colorData,
+                count = count,
+            }.Schedule(totalPixels, 64, dependsOn);
+
+            int t = triangles.Length / 3;
+            dependsOn = new RasterizeTrianglesJob
+            {
+                triangles = triangles,
+                uvs = proxy.nativeUV,
+                vertices = proxy.animatedVertices,
+                normals = proxy.animatedNormals,
+                textureSize = textureSize,
+                deformation = deformation,
+                count = count,
+                localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
+                deformInfos = deforms,
+                extrusionRadius = extrusionRadius,
+                extrusionSmooth = extrusionSmooth,
+                deformationType = deformationType,
+                extrusionType = extrusionType,
+                damping = damping,
+                maxDeformation = float.MaxValue,
+
+            }.Schedule(t, 32, dependsOn);
+
+            
+
+
+            dependsOn = new FinalizeTextureJob
+            {
+                deformation = deformation,
+                count = count,
+                outputColors = colorData,
+                maxDeformation = maxDeformation
+            }.Schedule(totalPixels, 64, dependsOn);
+
+            return dependsOn;
+        }
+
         [BurstCompile]
         protected struct ClearArraysJob : IJobParallelFor
         {
             public NativeArray<int> count;
-            public NativeArray<Color> colorData; // тоже очищаем, но не обязательно
-
+            public NativeArray<Color> colorData;
             public void Execute(int i)
             {
                 count[i] = 0;
@@ -192,13 +230,13 @@ namespace Proxy.Mesh
                 float2 uv1 = uvs[i1];
                 float2 uv2 = uvs[i2];
 
-                float3 d0 = vertices[i0];
-                float3 d1 = vertices[i1];
-                float3 d2 = vertices[i2];
+                float3 d0 = localToWorldMatrix.MultiplyPoint(vertices[i0]);
+                float3 d1 = localToWorldMatrix.MultiplyPoint(vertices[i1]);
+                float3 d2 = localToWorldMatrix.MultiplyPoint(vertices[i2]);
 
-                float3 n0 = normals[i0];
-                float3 n1 = normals[i1];
-                float3 n2 = normals[i2];
+                float3 n0 = localToWorldMatrix.MultiplyVector(normals[i0]);
+                float3 n1 = localToWorldMatrix.MultiplyVector(normals[i1]);
+                float3 n2 = localToWorldMatrix.MultiplyVector(normals[i2]);
 
                 // Bounding box в UV (0..1)
                 float minU = math.min(uv0.x, math.min(uv1.x, uv2.x));
@@ -238,11 +276,10 @@ namespace Proxy.Mesh
 
                         if (baryU >= -1e-5f && baryV >= -1e-5f && baryW >= -1e-5f)
                         {
-                            // Интерполяция вектора деформации
                             float3 point = baryU * d1 + baryV * d2 + baryW * d0;
                             float3 normal = baryU * n1 + baryV * n2 + baryW * n0;
                             int idx = py * textureSize + px;
-                            deformation[idx] = GetDeformation(point, normal, deformation[idx]);
+                            deformation[idx] = GetDeformation(point, math.normalizesafe(normal), deformation[idx]);
                             count[idx]++;
                         }
                     }
@@ -251,15 +288,13 @@ namespace Proxy.Mesh
 
             public float3 GetDeformation(float3 point, float3 normal, float3 deformation)
             {
-                float3 worldVertex = localToWorldMatrix.MultiplyPoint(point);
-                float3 worldNormal = localToWorldMatrix.MultiplyVector(normal).normalized;
                 float3 totalDisplacement = float3.zero;
                 float3 dir = float3.zero;
 
                 for (int i = 0; i < deformInfos.Length; i++)
                 {
                     DeformInfo info = deformInfos[i];
-                    totalDisplacement += GetForceAtPoint(deformInfos[i], worldVertex, worldNormal);
+                    totalDisplacement += GetForceAtPoint(deformInfos[i], point, normal);
                 }
 
                 if (math.length(totalDisplacement) > math.length(deformation))
@@ -351,5 +386,10 @@ namespace Proxy.Mesh
                 outputColors[i] = new Color(packed.x, packed.y, packed.z, 1f);
             }
         }
+    }
+
+    public interface IDeformationMap
+    {
+        public NativeArray<Color>[] maps { get; }
     }
 }

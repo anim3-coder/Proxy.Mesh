@@ -55,8 +55,8 @@ namespace Proxy.Mesh
 
         protected override void Initialize()
         {
-            InitializeProxyChildren();
             base.Initialize();
+            InitializeProxyChildren();
         }
 
         private void InitializeProxyChildren()

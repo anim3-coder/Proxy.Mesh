@@ -71,7 +71,9 @@ namespace Proxy.Mesh
         public NativeArray<float2> nativeUV;
         public NativeHashSet<int> triangleHash;
         public NativeArray<int> triangles;
-
+        public int subMeshCount => animatedMesh.subMeshCount;
+        public NativeArray<int>[] subMeshTriangles;
+        public Material[] materials => meshRenderer.materials;
         // Job handle
         protected JobHandle jobHandle;
         public virtual IProxyChild[] proxyChildren { get; protected set; }
@@ -112,7 +114,7 @@ namespace Proxy.Mesh
         #region Normals
         [field: SerializeField, Group("Normal")] public bool NormalRecalculationEnabled { get; internal set; }
         [SerializeField, HideInInspector] private NormalsRecalculationBased _normalsRecalculationBasedOn;
-        [TriInspector.ShowInInspector] public NormalsRecalculationBased normalsRecalculationBasedOn
+        [TriInspector.ShowInInspector, Group("Normal")] public NormalsRecalculationBased normalsRecalculationBasedOn
         {
             get
             {
@@ -322,15 +324,18 @@ namespace Proxy.Mesh
             int subMeshCount = originalMesh.subMeshCount;
             animatedMesh.subMeshCount = subMeshCount;
 
+            subMeshTriangles = new NativeArray<int>[subMeshCount];
+
             // Для каждого subMesh получаем его описание из оригинального меша
             for (int i = 0; i < subMeshCount; i++)
             {
                 // Получаем подмножество индексов для данного subMesh
-                var subMeshIndices = originalMesh.GetIndices(i);
+                var m_subMeshIndices = originalMesh.GetIndices(i);
+                subMeshTriangles[i] = new NativeArray<int>(originalMesh.GetTriangles(i), Allocator.Persistent);
                 // Создаём дескриптор: начальный индекс в общем буфере и длина
                 var descriptor = new SubMeshDescriptor(
                     indexStart: (int)originalMesh.GetIndexStart((int)i),  // можно также вычислить вручную, но удобнее через GetIndexStart (Unity 2019.3+)
-                    indexCount: subMeshIndices.Length,
+                    indexCount: m_subMeshIndices.Length,
                     topology: originalMesh.GetTopology(i)
                 );
 
@@ -340,6 +345,8 @@ namespace Proxy.Mesh
 
                 animatedMesh.SetSubMesh(i, descriptor, MeshUpdateFlags.DontRecalculateBounds);
             }
+
+
             animatedMesh.MarkDynamic();
             meshFilter.sharedMesh = animatedMesh;
 
@@ -472,6 +479,11 @@ namespace Proxy.Mesh
             if (changePoses.IsCreated) changePoses.Dispose();
             if (triangles.IsCreated) triangles.Dispose();
             if (triangleHash.IsCreated) triangleHash.Dispose();
+            
+            for(int i = 0; i < subMeshTriangles.Length; i++)
+            {
+                subMeshTriangles[i].Dispose();
+            }
 
             if(skeleton != null) skeleton.ShutdownSkeleton();
 
