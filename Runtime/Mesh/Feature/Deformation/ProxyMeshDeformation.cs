@@ -24,14 +24,14 @@ namespace Proxy.Mesh
         [TriInspector.EnableIf(nameof(IsExtrusion)), TriInspector.Group("Extrusion")] public float extrusionSmooth = 100;
         public NativeArray<DeformInfo> deforms;
         #region DeformVector
-        private NativeArray<float3> _deformVector;
-        public NativeArray<float3> deformVector
+        private NativeArray<float4> _deformVector;
+        public NativeArray<float4> addedDeformation
         {
             get
             {
                 if(_deformVector.IsCreated)
                     return _deformVector;
-                _deformVector = new NativeArray<float3>(proxy.vertexCount, Allocator.Persistent);
+                _deformVector = new NativeArray<float4>(proxy.vertexCount, Allocator.Persistent);
                 return _deformVector;
             }
         }
@@ -126,7 +126,7 @@ namespace Proxy.Mesh
                             extrusionSmooth = extrusionSmooth,
                             deformationType = deformationType,
                             extrusionType = extrusionType,
-                            deformVector = deformVector,
+                            deformVector = addedDeformation,
                             damping = damping,
                             applyDeformaion = applyDeformation,
                             animatedVertices = proxy.animatedVertices,
@@ -166,7 +166,7 @@ namespace Proxy.Mesh
                             applyDeformaion = applyDeformation,
                             animatedVertices = proxy.animatedVertices,
                             animatedNormals = proxy.animatedNormals,
-                            deformVector = deformVector,
+                            deformVector = addedDeformation,
                             updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
                             maxDeformation = float.MaxValue,
                         }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
@@ -335,7 +335,7 @@ namespace Proxy.Mesh
             [ReadOnly] public Matrix4x4 worldToLocalMatrix;
             [NativeDisableParallelForRestriction] public NativeArray<DeformInfo> deformInfos;
             [NativeDisableParallelForRestriction] public NativeArray<float3> animatedVertices;
-            [NativeDisableParallelForRestriction] public NativeArray<float3> deformVector;
+            [NativeDisableParallelForRestriction] public NativeArray<float4> deformVector;
             [ReadOnly] public NativeArray<float3> animatedNormals;
             [WriteOnly] public NativeParallelHashSet<int>.ParallelWriter updateIndices;
             public void Execute(int vertexIndex)
@@ -359,21 +359,21 @@ namespace Proxy.Mesh
                     deformInfos[i] = info;
                 }
 
-                if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex]))
+                if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex].xyz))
                 {
                     updateIndices.Add(vertexIndex);
-                    deformVector[vertexIndex] = math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement);
-                    worldVertex += deformVector[vertexIndex];
+                    deformVector[vertexIndex] = new float4(math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement), maxDeformation);
+                    worldVertex += deformVector[vertexIndex].xyz;
                     if(applyDeformaion)
                         animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);
                 }
-                else if (math.length(deformVector[vertexIndex]) > 0)
+                else if (math.length(deformVector[vertexIndex].xyz) > 0)
                 {
                     updateIndices.Add(vertexIndex);
-                    worldVertex += deformVector[vertexIndex];
+                    worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
                         animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);
-                    deformVector[vertexIndex] = math.lerp(deformVector[vertexIndex], 0, damping);
+                    deformVector[vertexIndex] = new float4(math.lerp(deformVector[vertexIndex], 0, damping).xyz, maxDeformation);
                 }
             }
 
@@ -452,7 +452,7 @@ namespace Proxy.Mesh
             [ReadOnly] public Matrix4x4 worldToLocalMatrix;
             [NativeDisableParallelForRestriction] public NativeArray<DeformInfo> deformInfos;
             [NativeDisableParallelForRestriction] public NativeArray<float3> animatedVertices;
-            [NativeDisableParallelForRestriction] public NativeArray<float3> deformVector;
+            [NativeDisableParallelForRestriction] public NativeArray<float4> deformVector;
             [ReadOnly] public NativeArray<float3> animatedNormals;
             [ReadOnly] public NativeArray<int> indices;
             [WriteOnly] public NativeParallelHashSet<int>.ParallelWriter updateIndices;
@@ -479,21 +479,21 @@ namespace Proxy.Mesh
                     deformInfos[i] = info;
                 }
 
-                if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex]))
+                if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex].xyz))
                 {
                     updateIndices.Add(vertexIndex);
-                    deformVector[vertexIndex] = math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement);
-                    worldVertex += deformVector[vertexIndex];
+                    deformVector[vertexIndex] = new float4(math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement), maxDeformation);
+                    worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
                         animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);
                 }
-                else if (math.length(deformVector[vertexIndex]) > 0)
+                else if (math.length(deformVector[vertexIndex].xyz) > 0)
                 {
                     updateIndices.Add(vertexIndex);
-                    worldVertex += deformVector[vertexIndex];
+                    worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
                         animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);
-                    deformVector[vertexIndex] = math.lerp(deformVector[vertexIndex], 0, damping);
+                    deformVector[vertexIndex] = new float4(math.lerp(deformVector[vertexIndex], 0, damping).xyz, maxDeformation);
                 }
             }
 
@@ -638,6 +638,9 @@ namespace Proxy.Mesh
 
     public interface IDeformaion
     {
-        public NativeArray<float3> deformVector { get; }
+        /// <summary>
+        /// xyz - DeformVector | w - maxDeformation
+        /// </summary>
+        public NativeArray<float4> addedDeformation { get; }
     }
 }

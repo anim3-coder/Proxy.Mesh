@@ -262,18 +262,17 @@ namespace Proxy.Mesh
             [ReadOnly] public Matrix4x4 localToWorldMatrix;
             [ReadOnly] public float3 position;
             [ReadOnly] public Color color;
-            [ReadOnly] public NativeArray<int> triangles;
+            [ReadOnly] public NativeArray<int3> triangles;
             [ReadOnly] public NativeHashSet<int> indices;
             [ReadOnly] public NativeArray<float3> vertices;
 
             public void Execute()
             {
-                int count = triangles.Length / 3;
-                for (int i = 0; i < count; i+=3)
+                for (int i = 0; i < triangles.Length; i+=3)
                 {
-                    int v0 = triangles[i * 3];
-                    int v1 = triangles[i * 3 + 1];
-                    int v2 = triangles[i * 3 + 2];
+                    int v0 = triangles[i].x;
+                    int v1 = triangles[i].y;
+                    int v2 = triangles[i].z;
 
                     if(indices.Contains(v0) && indices.Contains(v1) && indices.Contains(v2))
                     {

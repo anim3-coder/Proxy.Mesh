@@ -49,7 +49,6 @@ namespace Proxy.Mesh
                 if(changePoses.IsSet(index)) D.raw(new Shape.Sphere(transform.position, 0.01f), color: Color.red);
             }
         }
-
         [BurstCompile]
         protected struct RaycastJob : IJobParallelFor
         {
@@ -57,15 +56,15 @@ namespace Proxy.Mesh
             [ReadOnly] public NativeArray<float3> vertices;
             [ReadOnly] public Vector3 origin;
             [ReadOnly] public Vector3 direction;
-            [ReadOnly] public NativeArray<int> triangles;
+            [ReadOnly] public NativeArray<int3> triangles;
             [ReadOnly] public float closestHitDistance;
             [WriteOnly] public NativeList<Vector3>.ParallelWriter resultPosition;
             [WriteOnly] public NativeList<Vector3>.ParallelWriter resultNormal;
             public void Execute(int i)
             {
-                Vector3 v0 = localToWorldMatrix.MultiplyPoint3x4(vertices[triangles[i * 3]]);
-                Vector3 v1 = localToWorldMatrix.MultiplyPoint3x4(vertices[triangles[i * 3 + 1]]);
-                Vector3 v2 = localToWorldMatrix.MultiplyPoint3x4(vertices[triangles[i * 3 + 2]]);
+                Vector3 v0 = localToWorldMatrix.MultiplyPoint3x4(vertices[triangles[i].x]);
+                Vector3 v1 = localToWorldMatrix.MultiplyPoint3x4(vertices[triangles[i].y]);
+                Vector3 v2 = localToWorldMatrix.MultiplyPoint3x4(vertices[triangles[i].z]);
 
                 if (RayIntersectsTriangle(
                     origin,

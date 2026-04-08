@@ -106,7 +106,7 @@ namespace Proxy.Mesh
                         triangles = proxyMesh.triangles,
                         tangents = proxyMesh.animatedTangents,
                         updateIndices = proxyMesh.normalsRecalculation.updateIndices.AsReadOnly(),
-                    }.Schedule(proxyMesh.triangles.Length / 3, 32, dependsOn);
+                    }.Schedule(proxyMesh.triangles.Length, 32, dependsOn);
                     
                     dependsOn = new NormalizeTangentsJob()
                     {
@@ -147,14 +147,14 @@ namespace Proxy.Mesh
                 [ReadOnly] public NativeArray<float3> normals;
                 [ReadOnly] public NativeArray<float2> uv;
                 [NativeDisableParallelForRestriction] public NativeArray<float4> tangents;
-                [ReadOnly] public NativeArray<int> triangles;
+                [ReadOnly] public NativeArray<int3> triangles;
                 [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
 
                 public void Execute(int triangleIndex)
                 {
-                    int i0 = triangles[triangleIndex * 3];
-                    int i1 = triangles[triangleIndex * 3 + 1];
-                    int i2 = triangles[triangleIndex * 3 + 2];
+                    int i0 = triangles[triangleIndex].x;
+                    int i1 = triangles[triangleIndex].y;
+                    int i2 = triangles[triangleIndex].z;
 
                     // Проверяем, что все три вершины требуют обновления
                     if (!(updateIndices.Contains(i0) && updateIndices.Contains(i1) && updateIndices.Contains(i2)))
@@ -247,7 +247,7 @@ namespace Proxy.Mesh
             {
                 [ReadOnly] public NativeArray<float3> vertices;
                 [ReadOnly] public NativeArray<float2> uvs;
-                [ReadOnly] public NativeArray<int> triangles;
+                [ReadOnly] public NativeArray<int3> triangles;
                 [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
 
                 [NativeDisableParallelForRestriction]
@@ -257,12 +257,11 @@ namespace Proxy.Mesh
 
                 public void Execute()
                 {
-                    int count = triangles.Length / 3;
-                    for (int triangleIndex = 0; triangleIndex < count; triangleIndex++)
+                    for (int triangleIndex = 0; triangleIndex < triangles.Length; triangleIndex++)
                     {
-                        int v0 = triangles[triangleIndex * 3];
-                        int v1 = triangles[triangleIndex * 3 + 1];
-                        int v2 = triangles[triangleIndex * 3 + 2];
+                        int v0 = triangles[triangleIndex].x;
+                        int v1 = triangles[triangleIndex].y;
+                        int v2 = triangles[triangleIndex].z;
 
                         if (!updateIndices.Contains(v0) || !updateIndices.Contains(v1) || !updateIndices.Contains(v2))
                             return;

@@ -33,7 +33,6 @@ namespace Proxy.Mesh.Normals
         }
         public override JobHandle StartJob(JobHandle dependsOn)
         {
-            int t = proxy.triangles.Length / 3;
             dependsOn = new ReadWrite()
             {
                 input = proxy.animatedNormals,

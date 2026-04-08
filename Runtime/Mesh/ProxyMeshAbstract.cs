@@ -10,8 +10,7 @@ using UnityEngine;
 using System.Linq;
 using System.Data;
 using System;
-using Proxy.Mesh.Normals;
-using static Proxy.Mesh.NormalsRecalculation;
+
 
 namespace Proxy.Mesh
 {
@@ -61,6 +60,7 @@ namespace Proxy.Mesh
         // Quality settings
         [SerializeField, Group("Main"), EnumToggleButtons] protected Quality bonesPerVertexQuality = Quality.FourBones;
         [SerializeField, Group("Main")] protected bool IsDrawChangesBone;
+        [SerializeField, Group("Main")] protected bool IgnoreTangents;
         // Job data
         public NativeArray<float3> animatedVertices;
         public NativeArray<float3> animatedNormals;
@@ -69,13 +69,11 @@ namespace Proxy.Mesh
         public NativeArray<float3> nativeBaseNormals;
         public NativeArray<float4> nativeBaseTangents;
         public NativeArray<float2> nativeUV;
-        public NativeHashSet<int> triangleHash;
-        public NativeArray<int> triangles;
+        public NativeArray<int3> triangles;
         public int subMeshCount => animatedMesh.subMeshCount;
-        public NativeArray<int>[] subMeshTriangles;
+        public NativeArray<int3>[] subMeshTriangles;
         public Material[] materials => meshRenderer.materials;
-        // Job handle
-        protected JobHandle jobHandle;
+        public Material[] sharedMaterials => meshRenderer.sharedMaterials;
         public virtual IProxyChild[] proxyChildren { get; protected set; }
 
         // Bounds data
@@ -161,8 +159,33 @@ namespace Proxy.Mesh
         #endregion
 
         #region Tangents
-        [field: SerializeField, Group("Tangent")] public bool TangentRecalculationEnabled { get; internal set; }
-        [field: SerializeField, Group("Tangent"), HideLabel, InlineProperty] public TangentsRecalculation tangentsRecalculation { get; internal set; }
+        private bool m_haveTangents;
+        public bool dontHaveTangents
+        {
+            get
+            {
+                return !haveTangents;
+            }
+        }
+        public bool haveTangents
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (Application.isPlaying == false)
+                {
+                    return meshFilter.sharedMesh.HasVertexAttribute(VertexAttribute.Tangent) && !IgnoreTangents;
+                }
+#endif
+                return m_haveTangents && !IgnoreTangents;
+            }
+            set
+            {
+                m_haveTangents = value;
+            }
+        }
+        [field: SerializeField, Group("Tangent"), HideIf(nameof(dontHaveTangents))] public bool TangentRecalculationEnabled { get; internal set; }
+        [field: SerializeField, Group("Tangent"), HideLabel, InlineProperty, HideIf(nameof(dontHaveTangents))] public TangentsRecalculation tangentsRecalculation { get; internal set; }
         #endregion
 
         #region Abstract Child
@@ -281,6 +304,16 @@ namespace Proxy.Mesh
             }
         }
 
+        public T[] Get<T>()
+        {
+            var list = GetComponents<T>().ToList();
+            if (transform.parent == null)
+                list.AddRange(GetComponentsInChildren<T>(true));
+            else
+                list.AddRange(transform.parent.GetComponentsInChildren<T>(true));
+            return list.ToArray();
+        }
+
         protected virtual void Initialize()
         {
             meshFilter = GetComponent<MeshFilter>();
@@ -306,15 +339,25 @@ namespace Proxy.Mesh
             // Создаем анимированную копию меша
             animatedMesh = Instantiate(originalMesh);
             
-            var vertexAttributes = new[]
+            List<VertexAttributeDescriptor> vertexAttributes = new List<VertexAttributeDescriptor>()
             {
                 new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
                 new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 1),
-                new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 2),
-                new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4, stream: 3)
                 // при необходимости добавьте другие атрибуты (UV, Tangent и т.д.) с указанием stream 2, 3
             };
-            animatedMesh.SetVertexBufferParams(vertexCount, vertexAttributes);
+
+            if(originalMesh.HasVertexAttribute(VertexAttribute.TexCoord0))
+            {
+                vertexAttributes.Add(new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 2));
+            }
+
+            if(originalMesh.HasVertexAttribute(VertexAttribute.Tangent))
+            {
+                haveTangents = true;
+                vertexAttributes.Add(new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4, stream: 3));
+            }
+
+            animatedMesh.SetVertexBufferParams(vertexCount, vertexAttributes.ToArray());
             
             int[] originalIndices = originalMesh.triangles;
             animatedMesh.SetIndexBufferParams(originalIndices.Length, IndexFormat.UInt32);
@@ -324,14 +367,14 @@ namespace Proxy.Mesh
             int subMeshCount = originalMesh.subMeshCount;
             animatedMesh.subMeshCount = subMeshCount;
 
-            subMeshTriangles = new NativeArray<int>[subMeshCount];
+            subMeshTriangles = new NativeArray<int3>[subMeshCount];
 
             // Для каждого subMesh получаем его описание из оригинального меша
             for (int i = 0; i < subMeshCount; i++)
             {
                 // Получаем подмножество индексов для данного subMesh
                 var m_subMeshIndices = originalMesh.GetIndices(i);
-                subMeshTriangles[i] = new NativeArray<int>(originalMesh.GetTriangles(i), Allocator.Persistent);
+                subMeshTriangles[i] = new NativeArray<int3>(Convert(originalMesh.GetTriangles(i)), Allocator.Persistent);
                 // Создаём дескриптор: начальный индекс в общем буфере и длина
                 var descriptor = new SubMeshDescriptor(
                     indexStart: (int)originalMesh.GetIndexStart((int)i),  // можно также вычислить вручную, но удобнее через GetIndexStart (Unity 2019.3+)
@@ -384,15 +427,16 @@ namespace Proxy.Mesh
             // Создание Native массивов
             nativeBaseVertices = new NativeArray<float3>(Convert(baseVertices), Allocator.Persistent);
             nativeBaseNormals = new NativeArray<float3>(Convert(baseNormals), Allocator.Persistent);
-            nativeBaseTangents = new NativeArray<float4>(Convert(baseTangents), Allocator.Persistent);
             nativeUV = new NativeArray<float2>(Convert(originalUV), Allocator.Persistent);
             animatedVertices = new NativeArray<float3>(vertexCount, Allocator.Persistent);
             animatedNormals = new NativeArray<float3>(vertexCount, Allocator.Persistent);
-            animatedTangents = new NativeArray<float4> (vertexCount, Allocator.Persistent);
-            triangles = new NativeArray<int>(originalMesh.triangles, Allocator.Persistent);
-            triangleHash = new NativeHashSet<int>(originalMesh.triangles.Length, Allocator.Persistent);
-            foreach (var tri in triangles)
-                triangleHash.Add(tri);
+            triangles = new NativeArray<int3>(Convert(originalMesh.triangles), Allocator.Persistent);
+
+            if(haveTangents)
+            {
+                nativeBaseTangents = new NativeArray<float4>(Convert(baseTangents), Allocator.Persistent);
+                animatedTangents = new NativeArray<float4>(vertexCount, Allocator.Persistent);
+            }
 
             // Инициализация для расчета границ
             boundsMin = new NativeArray<float>(3, Allocator.Persistent);
@@ -460,7 +504,7 @@ namespace Proxy.Mesh
         public void Dispose() => Cleanup();
         protected virtual void Cleanup()
         {
-            jobHandle.Complete();
+            ProxyManager.JobComplete();
 
             if (nativeBaseVertices.IsCreated) nativeBaseVertices.Dispose();
             if (animatedVertices.IsCreated) animatedVertices.Dispose();
@@ -478,8 +522,7 @@ namespace Proxy.Mesh
             if (bindPoses.IsCreated) bindPoses.Dispose();
             if (changePoses.IsCreated) changePoses.Dispose();
             if (triangles.IsCreated) triangles.Dispose();
-            if (triangleHash.IsCreated) triangleHash.Dispose();
-            
+
             for(int i = 0; i < subMeshTriangles.Length; i++)
             {
                 subMeshTriangles[i].Dispose();
@@ -513,7 +556,11 @@ namespace Proxy.Mesh
                     return;
                 animatedMesh.SetVertexBufferData(animatedVertices, 0, 0, animatedVertices.Length,stream: 0,flags: MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontNotifyMeshUsers | MeshUpdateFlags.DontResetBoneBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontValidateLodRanges);
                 animatedMesh.SetVertexBufferData(animatedNormals, 0, 0,animatedNormals.Length,stream: 1, flags: MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontNotifyMeshUsers | MeshUpdateFlags.DontResetBoneBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontValidateLodRanges);
-                animatedMesh.SetVertexBufferData(animatedTangents, 0, 0, animatedTangents.Length, stream: 3, flags: MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontNotifyMeshUsers | MeshUpdateFlags.DontResetBoneBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontValidateLodRanges);
+
+                if (haveTangents)
+                {
+                    animatedMesh.SetVertexBufferData(animatedTangents, 0, 0, animatedTangents.Length, stream: 3, flags: MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontNotifyMeshUsers | MeshUpdateFlags.DontResetBoneBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontValidateLodRanges);
+                }
 
                 if (boundsMin.IsCreated && boundsMax.IsCreated)
                 {
@@ -561,6 +608,26 @@ namespace Proxy.Mesh
             }
         }
 
+        public static int3[] Convert(int[] triangles)
+        {
+            if (triangles == null)
+                throw new ArgumentNullException(nameof(triangles));
+
+            int triangleCount = triangles.Length / 3;
+            if (triangles.Length % 3 != 0)
+                throw new ArgumentException("Массив треугольников должен содержать количество элементов, кратное 3.", nameof(triangles));
+
+            int3[] result = new int3[triangles.Length];
+
+            for (int i = 0; i < triangleCount; i++)
+            {
+                int baseIndex = i * 3;
+                result[i] = new int3(triangles[baseIndex], triangles[baseIndex + 1], triangles[baseIndex + 2]);
+            }
+
+            return result;
+        }
+
         public static float2[] Convert(Vector2[] data)
         {
             return Convert<float2, Vector2>(data, (Vector2 m) => m);
@@ -593,7 +660,7 @@ namespace Proxy.Mesh
             return result;
         }
 
-        protected virtual JobHandle StartNewJob(JobHandle dependsOn)
+        public virtual JobHandle StartNewJob(JobHandle dependsOn)
         {
             if (gameObject.activeSelf == false)
                 return dependsOn;
@@ -779,7 +846,7 @@ namespace Proxy.Mesh
                 localToWorldMatrix = transform.localToWorldMatrix,
                 vertices = animatedVertices,
                 triangles = triangles
-            }.Schedule(triangles.Length / 3, math.min(1, triangles.Length / 100),dependsOn);
+            }.Schedule(triangles.Length, 32,dependsOn);
         }
         #endregion
 

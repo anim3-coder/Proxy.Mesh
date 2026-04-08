@@ -18,7 +18,6 @@ namespace Proxy.Mesh
     public class ProxyMesh : ProxyMeshAbstract
     {
         #region Data
-        protected bool jobCompleted;
         protected Transform rootBone
         {
             get
@@ -53,6 +52,16 @@ namespace Proxy.Mesh
             Initialize();
         }
 
+        private void OnEnable()
+        {
+            ProxyManager.proxies.Add(this);
+        }
+
+        private void OnDisable()
+        {
+            ProxyManager.proxies.Remove(this);
+        }
+
         protected override void Initialize()
         {
             base.Initialize();
@@ -61,13 +70,7 @@ namespace Proxy.Mesh
 
         private void InitializeProxyChildren()
         {
-            var list = GetComponents<IProxyChild>().ToList();
-
-            if (transform.parent == null)
-                list.AddRange(GetComponentsInChildren<IProxyChild>(true));
-            else
-                list.AddRange(transform.parent.GetComponentsInChildren<IProxyChild>(true));
-            proxyChildren = list.ToArray();
+            proxyChildren = Get<IProxyChild>();
 
             var proxyJobsList = new List<IProxyJob>();
             for (int i = 0; i < proxyChildren.Length; i++)
@@ -84,30 +87,23 @@ namespace Proxy.Mesh
                 proxyChildren[i].OnInit(this);
             }
         }
-        protected virtual void FixedUpdate()
+        public virtual void OnFixedUpdate()
         {
             this.skeleton.FixedUpdate();
         }
-        protected virtual void Update()
+        public virtual void OnUpdate(bool IsJobCompleted)
         {
             this.skeleton.Update();
-            // Ожидание завершения предыдущего job
-            if (jobHandle.IsCompleted)
+
+            if (IsJobCompleted)
             {
-                CompleteJob();
                 OnUpdateMesh();
-                jobCompleted = true;
             }
         }
 
-        private void LateUpdate()
+        public virtual void OnLateUpdate(bool IsJobCompleted)
         {
-            // Если job завершен в этом кадре - обработаем результат
-            if (jobCompleted && jobHandle.IsCompleted)
-            {
-                jobHandle = StartNewJob(jobHandle);
-                jobCompleted = false;
-            }
+        
         }
 
         public override Transform[] Bones
@@ -208,7 +204,7 @@ namespace Proxy.Mesh
         #endregion
 
         #region Override
-        protected override JobHandle StartNewJob(JobHandle dependsOn)
+        public override JobHandle StartNewJob(JobHandle dependsOn)
         {
             if (gameObject.activeSelf == false)
                 return dependsOn;
@@ -302,12 +298,6 @@ namespace Proxy.Mesh
             return dependsOn;
         }
 
-        public event System.Action OnCompleteJob;
-        protected virtual void CompleteJob()
-        {
-            jobHandle.Complete();
-            OnCompleteJob?.Invoke();
-        }
         protected virtual void OnUpdateMesh()
         {
             UpdateMesh();

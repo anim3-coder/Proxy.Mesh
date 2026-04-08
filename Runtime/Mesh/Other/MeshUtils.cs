@@ -8,7 +8,7 @@ namespace Proxy.Mesh
     public static partial class MeshUtils
     {
         public static void ComputeVertexNeighbours(
-    NativeArray<int> triangles,
+    NativeArray<int3> triangles,
     int vertexCount,
     out NativeArray<int> neighbourCounts,
     out NativeArray<int> neighbourIndices,
@@ -16,15 +16,14 @@ namespace Proxy.Mesh
     int maxNeighbours = int.MaxValue,
     Allocator allocator = Allocator.Temp)
         {
-            int triangleCount = triangles.Length / 3;
 
             // 1. Собираем все рёбра (каноническая форма: меньший индекс первым)
-            NativeArray<int2> edges = new NativeArray<int2>(triangleCount * 3, Allocator.Temp);
-            for (int i = 0; i < triangleCount; i++)
+            NativeArray<int2> edges = new NativeArray<int2>(triangles.Length, Allocator.Temp);
+            for (int i = 0; i < triangles.Length; i++)
             {
-                int i0 = triangles[i * 3];
-                int i1 = triangles[i * 3 + 1];
-                int i2 = triangles[i * 3 + 2];
+                int i0 = triangles[i].x;
+                int i1 = triangles[i].y;
+                int i2 = triangles[i].z;
 
                 edges[i * 3] = new int2(math.min(i0, i1), math.max(i0, i1));
                 edges[i * 3 + 1] = new int2(math.min(i1, i2), math.max(i1, i2));

@@ -1,4 +1,4 @@
-﻿Shader "Custom/TessellationLit"
+﻿Shader "Proxy/TessellationLit"
 {
     Properties
     {

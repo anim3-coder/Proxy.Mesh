@@ -44,7 +44,7 @@ namespace Proxy.Mesh
             Cleanup();
         }
 
-        protected override JobHandle StartNewJob(JobHandle dependsOn)
+        public override JobHandle StartNewJob(JobHandle dependsOn)
         {
             if (gameObject.activeSelf == false)
                 return dependsOn;
