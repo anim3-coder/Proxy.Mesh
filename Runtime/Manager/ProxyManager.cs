@@ -15,23 +15,20 @@ namespace Proxy.Mesh
     {
         public delegate void UpdateMethod();
 
-        static volatile bool isPlaying = false;
+        private static IManager[] managers = new IManager[]
+        {
+            new ColliderManager(),
+            new MeshManager(),
+        };
+        public static MeshManager MeshManager => managers[1] as MeshManager;
+        public static ColliderManager ColliderManager => managers[0] as ColliderManager;
 
-        public static event System.Action OnCompleteJob;
-
-        public static List<ProxyMesh> proxies = new List<ProxyMesh>();
+        public static event Action OnCompleteJob;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ReloadDomain()
         {
-#if UNITY_EDITOR
-            // スクリプトコンパイル開始コールバック
-            CompilationPipeline.compilationStarted += OnStarted;
-#endif
-
             InitCustomGameLoop();
-
-            isPlaying = true;
         }
 
         public static void InitCustomGameLoop()
@@ -44,6 +41,9 @@ namespace Proxy.Mesh
             }
 
             SetCustomGameLoop(ref playerLoop);
+
+            foreach(IManager manager in managers) 
+                manager.OnInit();
 
             PlayerLoop.SetPlayerLoop(playerLoop);
         }
@@ -70,10 +70,12 @@ namespace Proxy.Mesh
                 updateDelegate = ProxyManager.LateUpdate
             };
             AddPlayerLoop(LateUpdate, ref playerLoop, "PostLateUpdate", "ScriptRunBehaviourLateUpdate");
+
+            Application.quitting += OnDestoy;
         }
 
         static JobHandle jobHandle = default;
-        static bool jobCompleted;
+        public static bool jobCompleted { get; private set; }
 
         public static void JobComplete()
         {
@@ -83,8 +85,8 @@ namespace Proxy.Mesh
 
         static void FixedUpdate()
         {
-            foreach(ProxyMesh proxy in proxies)
-                proxy.OnFixedUpdate();
+            foreach (IManager manager in managers)
+                manager.FixedUpdate();
         }
 
         static void Update()
@@ -94,22 +96,30 @@ namespace Proxy.Mesh
                 jobCompleted = true;
                 jobHandle.Complete();
             }
-            foreach (ProxyMesh proxy in proxies)
-                proxy.OnUpdate(jobCompleted);
+            foreach(IManager manager in managers)
+                manager.Update();
         }
 
         static void LateUpdate()
         {
-            foreach (ProxyMesh proxy in proxies)
-                proxy.OnLateUpdate(jobCompleted);
             if (jobCompleted && jobHandle.IsCompleted)
             {
-                foreach (ProxyMesh proxy in proxies)
-                {
-                    jobHandle = proxy.StartNewJob(jobHandle);
-                }
+                foreach (IManager manager in managers)
+                    jobHandle = manager.StartJob(jobHandle);
                 jobCompleted = false;
             }
+            foreach (IManager manager in managers)
+                manager.LateUpdate();
+        }
+
+        static void OnDestoy()
+        {
+            JobComplete();
+
+            Application.quitting -= OnDestoy;
+
+            foreach (IManager manager in managers)
+                manager.OnShutdown();
         }
 
         static void AddPlayerLoop(PlayerLoopSystem method, ref PlayerLoopSystem playerLoop, string categoryName, string systemName, bool last = false, bool before = false)
@@ -147,13 +157,15 @@ namespace Proxy.Mesh
             }
             return false;
         }
+    }
 
-        static void OnStarted(object obj)
-        {
-            //Debug.Log($"スクリプトコンパイル開始");
-            isPlaying = false;
-            //Dispose();
-
-        }
+    public interface IManager
+    {
+        void OnInit();
+        void OnShutdown();
+        void FixedUpdate();
+        void Update();
+        void LateUpdate();
+        JobHandle StartJob(JobHandle dependsOn);
     }
 }

@@ -46,8 +46,8 @@ namespace Proxy
             return distanceToAxis <= radius;
         }
     }
-    public enum ColliderType
+    public enum ColliderType : byte
     {
-        Sphere,Capsule
+        Sphere, Capsule
     }
 }

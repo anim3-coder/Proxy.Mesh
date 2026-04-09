@@ -54,12 +54,12 @@ namespace Proxy.Mesh
 
         private void OnEnable()
         {
-            ProxyManager.proxies.Add(this);
+            ProxyManager.MeshManager.Registration(this);
         }
 
         private void OnDisable()
         {
-            ProxyManager.proxies.Remove(this);
+            ProxyManager.MeshManager.Remove(this);
         }
 
         protected override void Initialize()

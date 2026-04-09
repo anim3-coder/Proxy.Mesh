@@ -4,70 +4,78 @@ using UnityEngine;
 
 namespace Proxy.Mesh
 {
-    [RequireComponent(typeof(UnityEngine.Collider))]
-    public class ProxyRegistrationCollider : Collider
+    [RequireComponent(typeof(Collider))]
+    public class ProxyRegistrationCollider : ProxyCollider
     {
-        public Proxy.ColliderType type;
-        private new UnityEngine.Collider collider;
-        public float SmoothingRadius = 1f;
-        private float3 point1;
-        private float3 point2;
-        private float radius;
-        private SphereCollider sphereCollider;
-        private CapsuleCollider capsuleCollider;
-        #region Transform
-        private Transform _transform;
-        public new Transform transform
+        public override ColliderType type
         {
             get
             {
-                if (_transform == null)
-                    _transform = base.transform;
-                return _transform;
+                if(collider as SphereCollider)
+                    return ColliderType.Sphere;
+                if(collider as CapsuleCollider)
+                    return ColliderType.Capsule;
+                return ColliderType.Sphere;
+            }
+        }
+        #region Collider
+        private Collider m_collider;
+        private new Collider collider
+        {
+            get
+            {
+                if (m_collider == null)
+                    m_collider = GetComponent<Collider>();
+                return m_collider;
             }
         }
         #endregion
-        private void Reset()
+        public override float3 Point1
         {
-            if(TryGetComponent<CapsuleCollider>(out CapsuleCollider _))
-                type = Proxy.ColliderType.Capsule;
-            if (TryGetComponent<SphereCollider>(out SphereCollider _))
-                type = Proxy.ColliderType.Sphere;
-        }
-        protected virtual void OnEnable()
-        {
-            collider = GetComponent<UnityEngine.Collider>();
-            if (collider is SphereCollider)
+            get
             {
-                sphereCollider = collider as SphereCollider;
-                type = Proxy.ColliderType.Sphere;
-            }
-            if (collider is CapsuleCollider)
-            {
-                capsuleCollider = collider as CapsuleCollider;
-                type = Proxy.ColliderType.Capsule;
+                switch(type)
+                {
+                    default:
+                    case ColliderType.Sphere:
+                        return (collider as SphereCollider).center;
+                    case ColliderType.Capsule:
+                        GetCapsulePoints(collider as CapsuleCollider, out float3 p1, out float3 p2);
+                        return p1;
+                }
             }
         }
-        protected virtual void Update()
+        public override float3 Point2
         {
-            switch (type)
+            get
             {
-                case Proxy.ColliderType.Sphere:
-                    point1 = transform.TransformPoint(sphereCollider.center);
-                    radius = sphereCollider.radius * transform.lossyScale.x;
-                    break;
-                case Proxy.ColliderType.Capsule:
-                    GetCapsulePoints(capsuleCollider, out point1, out point2);
-                    radius = capsuleCollider.radius * transform.lossyScale.x;
-                    break;
+                switch (type)
+                {
+                    default:
+                    case ColliderType.Sphere:
+                        return 0;
+                    case ColliderType.Capsule:
+                        GetCapsulePoints(collider as CapsuleCollider, out float3 p1, out float3 p2);
+                        return p2;
+                }
             }
+        }
+        public override float radius 
+        { 
+            get 
+            {
+                switch (type)
+                {
+                    default:
+                    case ColliderType.Sphere:
+                        return (collider as SphereCollider).radius;
+                    case ColliderType.Capsule:
+                        return (collider as CapsuleCollider).radius;
+                }
+            } 
         }
         public void GetCapsulePoints(CapsuleCollider capsule, out float3 start, out float3 end)
         {
-            Vector3 position = transform.position;
-            Quaternion rotation = transform.rotation;
-
-            // Локальные координаты направления капсулы
             Vector3 localDirection;
             Vector3 localCenter = capsule.center;
 
@@ -92,29 +100,17 @@ namespace Proxy.Mesh
             Vector3 localStart = localCenter - localDirection * halfHeight;
             Vector3 localEnd = localCenter + localDirection * halfHeight;
 
-            start = transform.TransformPoint(localStart);
-            end = transform.TransformPoint(localEnd);
-        }
-        public override float GetForceAtPoint(float3 point)
-        {
-            switch (type)
-            {
-                case Proxy.ColliderType.Sphere:
-                    return Physics.IsPointInSphere(point, point1, radius) ? 1 : 0;
-                case Proxy.ColliderType.Capsule:
-                    return Physics.IsPointInCapsule(point, point1, point2, radius) ? 1 : 0;
-                default:
-                    return 0;
-            }
+            start = localStart;
+            end = localEnd;
         }
         public override DeformInfo GetDeformInfo()
         {
             return new DeformInfo()
             {
                 type = type,
-                point1 = point1,
-                point2 = point2,
-                radius = radius,
+                point1 = transform.TransformPoint(Point1),
+                point2 = transform.TransformPoint(Point2),
+                radius = radius * transform.lossyScale.x,
             };
         }
     }

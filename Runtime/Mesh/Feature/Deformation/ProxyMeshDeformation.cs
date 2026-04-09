@@ -14,7 +14,7 @@ namespace Proxy.Mesh
     public class ProxyMeshDeformation : ExternalFeature, IDeformaion
     {
         [TriInspector.ValidateInput(nameof(Validate))]
-        [SerializeField, TriInspector.Group("Main")] private Collider[] colliders;
+        [SerializeField, TriInspector.Group("Main")] private ProxyCollider[] colliders;
         [TriInspector.Group("Main")] public bool applyDeformation = true;
         [TriInspector.Group("Main")] public bool calculatePenetration;
         [TriInspector.EnumToggleButtons, TriInspector.Group("Main")] public DeformationType deformationType;
@@ -22,17 +22,17 @@ namespace Proxy.Mesh
         [TriInspector.EnumToggleButtons, TriInspector.Group("Extrusion")] public ExtrusionType extrusionType;
         [TriInspector.EnableIf(nameof(IsExtrusion)), TriInspector.Group("Extrusion")] public float extrusionRadius = 5;
         [TriInspector.EnableIf(nameof(IsExtrusion)), TriInspector.Group("Extrusion")] public float extrusionSmooth = 100;
-        public NativeArray<DeformInfo> deforms;
+        
         #region DeformVector
-        private NativeArray<float4> _deformVector;
+        private NativeArray<float4> _addedDeformation;
         public NativeArray<float4> addedDeformation
         {
             get
             {
-                if(_deformVector.IsCreated)
-                    return _deformVector;
-                _deformVector = new NativeArray<float4>(proxy.vertexCount, Allocator.Persistent);
-                return _deformVector;
+                if(_addedDeformation.IsCreated)
+                    return _addedDeformation;
+                _addedDeformation = new NativeArray<float4>(proxy.vertexCount, Allocator.Persistent);
+                return _addedDeformation;
             }
         }
         #endregion
@@ -61,7 +61,7 @@ namespace Proxy.Mesh
         [TriInspector.Button("Find colliders")]
         public void FindColliders()
         { 
-            colliders = FindObjectsByType<Collider>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            colliders = FindObjectsByType<ProxyCollider>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         }
         
         public TriInspector.TriValidationResult Validate()
@@ -78,31 +78,14 @@ namespace Proxy.Mesh
         public override void OnInit(ProxyMesh proxyMesh)
         {
             base.OnInit(proxyMesh);
-            deforms = new NativeArray<DeformInfo>(colliders.Length, Allocator.Persistent);
         }
 
-        public override void OnJobComplete()
-        {
-            int a = 0;
-            for (int i = 0; i < deforms.Length; i++)
-            {
-                if (deforms[i].IsUpdate)
-                    colliders[i].outPenetration = deforms[i].outPenetration;
-                if (deforms[i].IsValid)
-                    a++;
-                var info = colliders[i].GetDeformInfo();
-                info.IsValid = deforms[i].IsValid;
-                deforms[i] = info;
-            }
-            activeCount = a;
-        }
         
         public override void OnShutdown(ProxyMesh proxyMesh)
         {
             base.OnShutdown(proxyMesh);
-            if (deforms.IsCreated) deforms.Dispose();
             if (intersects.IsCreated) intersects.Dispose();
-            if (_deformVector.IsCreated) _deformVector.Dispose();
+            if (_addedDeformation.IsCreated) _addedDeformation.Dispose();
         }
 
         public override JobHandle StartJob(JobHandle dependsOn)
@@ -113,13 +96,14 @@ namespace Proxy.Mesh
                 {
                     for(int i = 0; i < proxy.skeletonGroups.groupsCount; i++)
                     {
-                        if (intersects.IsSet(i) == false)
+                        if (intersects.IsSet(i) == false || proxy.skeletonGroups.roots[i].maxDeformation <= 0)
                             continue;
                         dependsOn = new WDeformJob
                         {
                             localToWorldMatrix = proxy.transform.localToWorldMatrix,
                             worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
-                            deformInfos = deforms,
+                            deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
+                            deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                             maxDeformation = proxy.skeletonGroups.roots[i].maxDeformation,
                             indices = proxy.skeletonGroups.indices[i],
                             extrusionRadius = extrusionRadius,
@@ -138,7 +122,8 @@ namespace Proxy.Mesh
                     {
                         localToWorldMatrix = proxy.transform.localToWorldMatrix,
                         bounds = proxy.skeletonGroups.bounds,
-                        deformInfos = deforms,
+                        deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
+                        deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                         intersects = _intersects,
                     }.Schedule(dependsOn);
                 }
@@ -149,7 +134,7 @@ namespace Proxy.Mesh
                         localToWorldMatrix = proxy.transform.localToWorldMatrix,
                         boundsMax = proxy.boundsMax,
                         boundsMin = proxy.boundsMin,
-                        deformInfos = deforms,
+                        deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                     }.Schedule(dependsOn);
                     if (activeCount > 0)
                     {
@@ -157,7 +142,8 @@ namespace Proxy.Mesh
                         {
                             localToWorldMatrix = proxy.transform.localToWorldMatrix,
                             worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
-                            deformInfos = deforms,
+                            deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
+                            deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                             extrusionRadius = extrusionRadius,
                             extrusionSmooth = extrusionSmooth,
                             deformationType = deformationType,
@@ -176,13 +162,14 @@ namespace Proxy.Mesh
                 {
                     dependsOn = new CalculatePenetration() 
                     {
-                        deformInfos = deforms,
+                        deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
+                        deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                         extrusionRadius = extrusionRadius,
                         indices = proxy.normalsRecalculation.updateIndices.AsReadOnly(),
                         vertices = proxy.animatedVertices,
                         normals = proxy.animatedNormals,
                         localToWorldMatrix = proxy.transform.localToWorldMatrix
-                    }.Schedule(deforms.Length, math.min(1, deforms.Length/5), dependsOn);
+                    }.Schedule(colliders.Length, 8, dependsOn);
                 }
             }
             return dependsOn;
@@ -214,6 +201,7 @@ namespace Proxy.Mesh
         protected struct BoundsIntersect : IJob
         {
             [ReadOnly] public Matrix4x4 localToWorldMatrix;
+            [ReadOnly] public NativeArray<int> deformIndices;
             public NativeArray<DeformInfo> deformInfos;
             [ReadOnly] public NativeArray<float> boundsMin;
             [ReadOnly] public NativeArray<float> boundsMax;
@@ -225,20 +213,21 @@ namespace Proxy.Mesh
                 float3 min = math.min(lmin, lmax);
                 float3 max = math.max(lmin, lmax);
 
-                for (int i = 0; i < deformInfos.Length; i++)
+                for (int i = 0; i < deformIndices.Length; i++)
                 {
-                    DeformInfo info = deformInfos[i];
+                    int dIndex = deformIndices[i];
+                    DeformInfo info = deformInfos[dIndex];
                     bool isValid;
                     switch (info.type)
                     {
-                        case Proxy.ColliderType.Sphere:
+                        case ColliderType.Sphere:
                             isValid = valid(info.point1, info.radius);
                             if (isValid)
                             {
                                 info.IsValid = true;
                             }
                             break;
-                        case Proxy.ColliderType.Capsule:
+                        case ColliderType.Capsule:
                             isValid = valid((info.point1 + info.point2) / 2, info.radius + math.length(info.point1 - info.point2));
                             if (isValid)
                             {
@@ -246,7 +235,7 @@ namespace Proxy.Mesh
                             }
                             break;
                     }
-                    deformInfos[i] = info;
+                    deformInfos[dIndex] = info;
                 }
                 bool valid(float3 point, float radius)
                 {
@@ -260,17 +249,19 @@ namespace Proxy.Mesh
         protected struct MultiBoundsIntersect : IJob
         {
             [ReadOnly] public Matrix4x4 localToWorldMatrix;
+            [ReadOnly] public NativeArray<int> deformIndices;
             public NativeArray<DeformInfo> deformInfos;
             [ReadOnly] public NativeArray<Bounds> bounds;
             [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
             public NativeBitArray intersects;
             public void Execute()
             {
-                for(int i = 0; i < deformInfos.Length;i++)
+                for(int i = 0; i < deformIndices.Length;i++)
                 {
-                    DeformInfo info = deformInfos[i];
+                    int dIndex = deformIndices[i];
+                    DeformInfo info = deformInfos[dIndex];
                     info.IsValid = false;
-                    deformInfos[i] = info;
+                    deformInfos[dIndex] = info;
                 }
 
                 for (int w = 0; w < bounds.Length; w++)
@@ -282,13 +273,14 @@ namespace Proxy.Mesh
                     float3 max = math.max(lmin, lmax);
 
                     bool intersect = false;
-                    for (int i = 0; i < deformInfos.Length; i++)
+                    for (int i = 0; i < deformIndices.Length; i++)
                     {
-                        DeformInfo info = deformInfos[i];
+                        int dIndex = deformIndices[i];
+                        DeformInfo info = deformInfos[dIndex];
                         bool isValid;
                         switch (info.type)
                         {
-                            case Proxy.ColliderType.Sphere:
+                            case ColliderType.Sphere:
                                 isValid = valid(info.point1, info.radius);
                                 if (isValid)
                                 {
@@ -296,7 +288,7 @@ namespace Proxy.Mesh
                                     intersect = true;
                                 }
                                 break;
-                            case Proxy.ColliderType.Capsule:
+                            case ColliderType.Capsule:
                                 isValid = valid((info.point1 + info.point2) / 2, info.radius + math.length(info.point1 - info.point2));
                                 if (isValid)
                                 {
@@ -305,7 +297,7 @@ namespace Proxy.Mesh
                                 }
                                 break;
                         }
-                        deformInfos[i] = info;
+                        deformInfos[dIndex] = info;
                     }
                     intersects.Set(w, intersect);
 
@@ -333,6 +325,7 @@ namespace Proxy.Mesh
             [ReadOnly] public float damping;
             [ReadOnly] public Matrix4x4 localToWorldMatrix;
             [ReadOnly] public Matrix4x4 worldToLocalMatrix;
+            [ReadOnly] public NativeArray<int> deformIndices;
             [NativeDisableParallelForRestriction] public NativeArray<DeformInfo> deformInfos;
             [NativeDisableParallelForRestriction] public NativeArray<float3> animatedVertices;
             [NativeDisableParallelForRestriction] public NativeArray<float4> deformVector;
@@ -349,19 +342,21 @@ namespace Proxy.Mesh
                 float3 totalDisplacement = float3.zero;
                 float3 dir = float3.zero;
 
-                for (int i = 0; i < deformInfos.Length; i++)
+                for (int i = 0; i < deformIndices.Length; i++)
                 {
-                    if (deformInfos[i].IsValid == false)
+                    int dIndex = deformIndices[i];
+                    if (deformInfos[dIndex].IsValid == false)
                         continue;
-                    DeformInfo info = deformInfos[i];
-                    totalDisplacement += GetForceAtPoint(deformInfos[i], worldVertex, worldNormal);
+                    DeformInfo info = deformInfos[dIndex];
+                    totalDisplacement += GetForceAtPoint(deformInfos[dIndex], worldVertex, worldNormal);
                     info.IsUpdate = true;
-                    deformInfos[i] = info;
+                    deformInfos[dIndex] = info;
                 }
 
                 if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex].xyz))
                 {
-                    updateIndices.Add(vertexIndex);
+                    if(maxDeformation > 0)
+                        updateIndices.Add(vertexIndex);
                     deformVector[vertexIndex] = new float4(math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement), maxDeformation);
                     worldVertex += deformVector[vertexIndex].xyz;
                     if(applyDeformaion)
@@ -450,6 +445,7 @@ namespace Proxy.Mesh
             [ReadOnly] public float maxDeformation;
             [ReadOnly] public Matrix4x4 localToWorldMatrix;
             [ReadOnly] public Matrix4x4 worldToLocalMatrix;
+            [ReadOnly] public NativeArray<int> deformIndices;
             [NativeDisableParallelForRestriction] public NativeArray<DeformInfo> deformInfos;
             [NativeDisableParallelForRestriction] public NativeArray<float3> animatedVertices;
             [NativeDisableParallelForRestriction] public NativeArray<float4> deformVector;
@@ -469,19 +465,21 @@ namespace Proxy.Mesh
                 float3 totalDisplacement = float3.zero;
                 float3 dir = float3.zero;
 
-                for (int i = 0; i < deformInfos.Length; i++)
+                for (int i = 0; i < deformIndices.Length; i++)
                 {
-                    if (deformInfos[i].IsValid == false)
+                    int dIndex = deformIndices[i];
+                    if (deformInfos[dIndex].IsValid == false)
                         continue;
-                    DeformInfo info = deformInfos[i];
-                    totalDisplacement += GetForceAtPoint(deformInfos[i], worldVertex, worldNormal);
+                    DeformInfo info = deformInfos[dIndex];
+                    totalDisplacement += GetForceAtPoint(deformInfos[dIndex], worldVertex, worldNormal);
                     info.IsUpdate = true;
-                    deformInfos[i] = info;
+                    deformInfos[dIndex] = info;
                 }
 
                 if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex].xyz))
                 {
-                    updateIndices.Add(vertexIndex);
+                    if(maxDeformation > 0)
+                        updateIndices.Add(vertexIndex);
                     deformVector[vertexIndex] = new float4(math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement), maxDeformation);
                     worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
@@ -562,6 +560,7 @@ namespace Proxy.Mesh
         protected struct CalculatePenetration : IJobParallelFor
         {
             [ReadOnly] public float extrusionRadius;
+            [ReadOnly] public NativeArray<int> deformIndices;
             public NativeArray<DeformInfo> deformInfos;
             [ReadOnly] public NativeArray<float3> vertices;
             [ReadOnly] public NativeArray<float3> normals;
@@ -569,6 +568,7 @@ namespace Proxy.Mesh
             [ReadOnly] public Matrix4x4 localToWorldMatrix;
             public void Execute(int index)
             {
+                index = deformIndices[index];
                 DeformInfo info = deformInfos[index];
                 int count = 0;
                 foreach(int i in indices)
@@ -607,7 +607,7 @@ namespace Proxy.Mesh
                 float distance = math.distance(point, center);
                 float3 direction = math.normalize(point - center);
                 if (distance <= radius)
-                {
+                {    
                     float penetration = radius - distance;
                     return (math.dot(direction, normal) < 0 ? -1 : 1) * direction * penetration;
                 }
@@ -623,7 +623,7 @@ namespace Proxy.Mesh
                 return float3.zero;
             }
         }
-    }
+}
     [BurstCompile]
     public struct DeformInfo
     {

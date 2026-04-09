@@ -21,6 +21,21 @@ namespace Proxy.Mesh
 
         private List<WaveImpact> activeWaveImpacts = new List<WaveImpact>();
         private NativeArray<WaveImpact> nativeWaveImpacts;
+
+        #region DeformVector
+        private NativeArray<float4> _addedDeformation;
+        public NativeArray<float4> addedDeformation
+        {
+            get
+            {
+                if (_addedDeformation.IsCreated)
+                    return _addedDeformation;
+                _addedDeformation = new NativeArray<float4>(proxy.vertexCount, Allocator.Persistent);
+                return _addedDeformation;
+            }
+        }
+        #endregion
+
         private ProxyMesh proxy;
         public bool IsInit => proxy != null && enabled;
 
@@ -85,7 +100,6 @@ namespace Proxy.Mesh
                 nativeWaveImpacts[i] = new WaveImpact { isValid = false };
             }
 
-            // Copy active impacts to native array
             int count = math.min(activeWaveImpacts.Count, maxWaveImpacts);
             for (int i = 0; i < count; i++)
             {

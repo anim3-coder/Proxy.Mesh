@@ -179,7 +179,7 @@ namespace Proxy.Mesh
             {
                 normals[i] = NormalSlerp(math.normalizesafe(lastNormals[i]), 
                                          math.normalizesafe(normals[i]), 
-                                         GetWeight(i));
+                                         math.clamp(GetWeight(i), 0, 1));
             }
         }
 
