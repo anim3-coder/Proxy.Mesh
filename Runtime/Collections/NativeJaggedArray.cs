@@ -10,10 +10,10 @@
     public unsafe struct NativeJaggedArray<T> : IDisposable where T : unmanaged
     {
         [NativeDisableUnsafePtrRestriction]
-        internal void* m_Buffer; // Указатель на массив указателей
+        internal void* m_Buffer;
         internal int m_NumRows;
         internal Allocator m_AllocatorLabel;
-        internal int* m_RowLengths; // Указатель на массив длин строк
+        internal NativeArray<int> m_RowLengths;
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
         internal AtomicSafetyHandle m_Safety;
@@ -27,15 +27,12 @@
             m_NumRows = numRows;
             m_AllocatorLabel = allocator;
 
-            // Выделяем память под массив указателей и массив длин строк
             long ptrArraySize = UnsafeUtility.SizeOf<IntPtr>() * numRows;
-            long lengthsArraySize = UnsafeUtility.SizeOf<int>() * numRows;
-
             m_Buffer = UnsafeUtility.Malloc(ptrArraySize, UnsafeUtility.AlignOf<IntPtr>(), allocator);
-            m_RowLengths = (int*)UnsafeUtility.Malloc(lengthsArraySize, UnsafeUtility.AlignOf<int>(), allocator);
-
             UnsafeUtility.MemClear(m_Buffer, ptrArraySize);
-            UnsafeUtility.MemClear(m_RowLengths, lengthsArraySize);
+
+            // Создаём NativeArray для длин строк
+            m_RowLengths = new NativeArray<int>(numRows, allocator, NativeArrayOptions.ClearMemory);
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             m_MinIndex = 0;
@@ -46,7 +43,6 @@
 #endif
         }
 
-        // Установить размер и выделить память для конкретной строки
         public void AllocateRow(int row, int length)
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
@@ -68,7 +64,13 @@
             m_RowLengths[row] = length;
         }
 
-        // Доступ к элементу в рваном массиве
+        public void AllocateRow(int row, T[] array)
+        {
+            AllocateRow(row, array.Length);
+            for(int i = 0; i < array.Length; i++)
+                this[row, i] = array[i];
+        }
+
         public T this[int row, int col]
         {
             get
@@ -93,6 +95,27 @@
             }
         }
 
+        public NativeSlice<T> GetRow(int row)
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+            if (row < 0 || row >= m_NumRows)
+                throw new IndexOutOfRangeException();
+#endif
+            IntPtr* rowPtrs = (IntPtr*)m_Buffer;
+            if (rowPtrs[row] == IntPtr.Zero)
+                return default;
+
+            int length = m_RowLengths[row];
+            var slice = NativeSliceUnsafeUtility.ConvertExistingDataToNativeSlice<T>(
+                (void*)rowPtrs[row], UnsafeUtility.SizeOf<T>(), length);
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            NativeSliceUnsafeUtility.SetAtomicSafetyHandle(ref slice, m_Safety);
+#endif
+            return slice;
+        }
+
         public int GetRowLength(int row)
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
@@ -103,25 +126,45 @@
             return m_RowLengths[row];
         }
 
+        public int Length => m_NumRows;
+        public bool IsCreated
+        {
+            get
+            {
+                return (IntPtr)m_Buffer != IntPtr.Zero;
+            }
+        }
+
         public void Dispose()
         {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
+#endif
+
             IntPtr* rowPtrs = (IntPtr*)m_Buffer;
             for (int i = 0; i < m_NumRows; i++)
             {
                 if (rowPtrs[i] != IntPtr.Zero)
                 {
                     UnsafeUtility.Free((void*)rowPtrs[i], m_AllocatorLabel);
+                    rowPtrs[i] = IntPtr.Zero; // Избегаем double-free
                 }
             }
 
-            UnsafeUtility.Free(m_Buffer, m_AllocatorLabel);
-            UnsafeUtility.Free(m_RowLengths, m_AllocatorLabel);
+            if (m_Buffer != null)
+            {
+                UnsafeUtility.Free(m_Buffer, m_AllocatorLabel);
+                m_Buffer = null;
+            }
+
+            if (m_RowLengths.IsCreated)
+            {
+                m_RowLengths.Dispose();
+            }
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             CollectionHelper.DisposeSafetyHandle(ref m_Safety);
 #endif
-            m_Buffer = null;
-            m_RowLengths = null;
             m_NumRows = 0;
         }
     }
