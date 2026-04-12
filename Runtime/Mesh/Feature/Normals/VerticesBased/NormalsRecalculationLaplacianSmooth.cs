@@ -47,15 +47,15 @@ namespace Proxy.Mesh.Normals
                 neighbourStartOffsets = neighbourStartOffsets,
                 vertexCount = proxy.vertexCount,
                 smoothAngle = smoothAngle,
-                updateIndices = proxy.normalsRecalculation.updateIndices.AsReadOnly(),
-            }.Schedule(dependsOn);
+                updateIndices = proxy.normalsRecalculation.updateIndicesList,
+            }.Schedule(proxy.normalsRecalculation.updateIndicesList, 32, dependsOn);
 
             return dependsOn;
         }
     }
 
     [BurstCompile]
-    public struct LaplacianSmoothNormalsJob : IJob
+    public struct LaplacianSmoothNormalsJob : IJobParallelForDefer
     {
         [ReadOnly] public NativeArray<float3> inputNormals;
         [NativeDisableParallelForRestriction] public NativeArray<float3> outputNormals;
@@ -65,47 +65,45 @@ namespace Proxy.Mesh.Normals
         [ReadOnly] public NativeArray<int> neighbourStartOffsets;
         [ReadOnly] public int vertexCount;
         [ReadOnly] public float smoothAngle;
-        [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
+        [ReadOnly] public NativeList<int> updateIndices;
 
-        public void Execute()
+        public void Execute(int i)
         {
-            foreach (int i in updateIndices)
+            i = updateIndices[i];
+            float3 current = inputNormals[i];
+            int neighbourCount = neighbourCounts[i];
+
+            if (neighbourCount == 0)
             {
-                float3 current = inputNormals[i];
-                int neighbourCount = neighbourCounts[i];
+                outputNormals[i] = current;
+                return;
+            }
 
-                if (neighbourCount == 0)
-                {
-                    outputNormals[i] = current;
-                    continue;
-                }
+            float3 sum = current;
+            int selectedCount = 1;
+            int start = neighbourStartOffsets[i];
 
-                float3 sum = current;
-                int selectedCount = 1;
-                int start = neighbourStartOffsets[i];
+            for (int j = 0; j < neighbourCount; ++j)
+            {
+                int nb = neighbourIndices[start + j];
+                float3 nbNormal = inputNormals[nb];
+                float angle = Angle(math.normalizesafe(current), math.normalizesafe(nbNormal));
+                if (angle > smoothAngle)
+                {
+                    sum += nbNormal;
+                    selectedCount++;
+                }
+            }
 
-                for (int j = 0; j < neighbourCount; ++j)
-                {
-                    int nb = neighbourIndices[start + j];
-                    float3 nbNormal = inputNormals[nb];
-                    float angle = Angle(math.normalizesafe(current), math.normalizesafe(nbNormal));
-                    if (angle > smoothAngle)
-                    {
-                        sum += nbNormal;
-                        selectedCount++;
-                    }
-                }
-
-                if (selectedCount > 0)
-                {
-                    float3 avg = sum / selectedCount;
-                    float3 newNormal = avg;
-                    outputNormals[i] = newNormal;
-                }
-                else
-                {
-                    outputNormals[i] = current;
-                }
+            if (selectedCount > 0)
+            {
+                float3 avg = sum / selectedCount;
+                float3 newNormal = avg;
+                outputNormals[i] = newNormal;
+            }
+            else
+            {
+                outputNormals[i] = current;
             }
         }
 

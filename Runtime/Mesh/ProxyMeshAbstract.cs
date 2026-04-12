@@ -19,7 +19,7 @@ namespace Proxy.Mesh
     [DeclareToggleGroup("Groups", Title = "Groups")]
     [DeclareToggleGroup("Normal", Title = "Normals Recalculation")]
     [DeclareToggleGroup("Tangent", Title = "Tangents Recalculation")]
-    public abstract partial class ProxyMeshAbstract : MonoBehaviour, IDisposable
+    public abstract partial class ProxyMeshAbstract : MonoBehaviour, ITransformRW, IDisposable
     {
         #region Data
         [SerializeField, RequiredGet(), Group("Main")] protected MeshFilter meshFilter;
@@ -92,6 +92,11 @@ namespace Proxy.Mesh
                 return _transform;
             }
         }
+        private Matrix4x4 m_localToWorldMatrix;
+        public Matrix4x4 localToWorldMatrix { get => m_localToWorldMatrix; set => m_localToWorldMatrix = value; }
+        private Matrix4x4 m_worldToLocalMatrix;
+        public Matrix4x4 worldToLocalMatrix { get => m_worldToLocalMatrix; set => m_worldToLocalMatrix = value; }
+
         #endregion
 
         [field: SerializeField, Group("Main")] public SkeletonDeformation skeletonDeformation { get; protected set; } = new SkeletonDeformation();
@@ -316,6 +321,8 @@ namespace Proxy.Mesh
 
         protected virtual void Initialize()
         {
+            ProxyManager.TransformManager.Registration(this);
+
             meshFilter = GetComponent<MeshFilter>();
             meshRenderer = GetComponent<MeshRenderer>();
 
@@ -505,6 +512,7 @@ namespace Proxy.Mesh
         protected virtual void Cleanup()
         {
             ProxyManager.JobComplete();
+            ProxyManager.TransformManager.Remove(this);
 
             if (nativeBaseVertices.IsCreated) nativeBaseVertices.Dispose();
             if (animatedVertices.IsCreated) animatedVertices.Dispose();
@@ -698,7 +706,7 @@ namespace Proxy.Mesh
                 dependsOn = new UpdateBoneMatricesJob()
                 {
                     bindPoses = bindPoses,
-                    worldToLocalMatrix = transform.worldToLocalMatrix,
+                    worldToLocalMatrix = worldToLocalMatrix,
                     boneMatrices = boneMatrices,
                     changePoses = changePoses,
                 }.Schedule(bonesTransformAccessArray, dependsOn);
@@ -843,7 +851,7 @@ namespace Proxy.Mesh
                 closestHitDistance = closestHitDistance,
                 resultNormal = resultNormal.AsParallelWriter(),
                 resultPosition = resultPosition.AsParallelWriter(),
-                localToWorldMatrix = transform.localToWorldMatrix,
+                localToWorldMatrix = localToWorldMatrix,
                 vertices = animatedVertices,
                 triangles = triangles
             }.Schedule(triangles.Length, 32,dependsOn);

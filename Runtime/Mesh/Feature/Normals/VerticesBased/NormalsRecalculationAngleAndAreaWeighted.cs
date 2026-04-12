@@ -21,8 +21,8 @@ namespace Proxy.Mesh.Normals
                 {
                     normals = proxy.animatedNormals,
                     previousNormals = proxy.normalsRecalculation.previousNormals,
-                    updateIndices = proxy.normalsRecalculation.updateIndices.AsReadOnly(),
-                }.Schedule(dependsOn);
+                    updateIndices = proxy.normalsRecalculation.updateIndicesList,
+                }.Schedule(proxy.normalsRecalculation.updateIndicesList, 64, dependsOn);
             }
             JobHandle RecalculateNormals()
             {
@@ -31,7 +31,7 @@ namespace Proxy.Mesh.Normals
                     vertices = proxy.animatedVertices,
                     normals = proxy.animatedNormals,
                     triangles = proxy.triangles,
-                    worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
+                    worldToLocalMatrix = proxy.worldToLocalMatrix,
                     additionalDeformation = proxy.normalsRecalculation.additiveDeformation,
                     updateIndices = proxy.normalsRecalculation.updateIndices.AsReadOnly()
                 }.Schedule(proxy.triangles.Length, 32, dependsOn);

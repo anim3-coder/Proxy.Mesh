@@ -62,10 +62,23 @@ namespace Proxy.Mesh
             ProxyManager.MeshManager.Remove(this);
         }
 
+        private NativeArray<JobHandle> jobsAfterSkinning;
+        private NativeArray<JobHandle> jobsParallel;
         protected override void Initialize()
         {
             base.Initialize();
             InitializeProxyChildren();
+
+            int count = 0;
+            for (int i = 0; i < proxyJob.Length; i++)
+                if (proxyJob[i].type == JobType.ParallelAfterSkinning)
+                    count++;
+            jobsAfterSkinning = new NativeArray<JobHandle>(count, Allocator.Persistent);
+            count = 0;
+            for (int i = 0; i < proxyJob.Length; i++)
+                if (proxyJob[i].type == JobType.Parallel)
+                    count++;
+            jobsParallel = new NativeArray<JobHandle>(count, Allocator.Persistent);
         }
 
         private void InitializeProxyChildren()
@@ -190,6 +203,8 @@ namespace Proxy.Mesh
             }
 
             skeleton = null;
+            jobsAfterSkinning.Dispose();
+            jobsParallel.Dispose();
         }
 
         public NativeArray<float3> GetVertices()
@@ -250,44 +265,32 @@ namespace Proxy.Mesh
 
         public JobHandle StartProxyJobsAfterSkinning(JobHandle dependsOn)
         {
-            int count = 0;
-            for (int i = 0; i < proxyJob.Length; i++)
-                if (proxyJob[i].type == JobType.ParallelAfterSkinning)
-                    count++;
-            if (count == 0)
+            if (jobsAfterSkinning.Length == 0)
                 return dependsOn;
-            NativeArray<JobHandle> jobs = new NativeArray<JobHandle>(count, Allocator.TempJob);
             int index = 0;
             for (int i = 0; i < proxyJob.Length; i++)
             {
                 if (proxyJob[i].type == JobType.ParallelAfterSkinning)
                 {
-                    jobs[index] = proxyJob[i].StartJob(dependsOn);
+                    jobsAfterSkinning[index] = proxyJob[i].StartJob(dependsOn);
                     index++;
                 }
             }
-            return jobs.Dispose(JobHandle.CombineDependencies(jobs));
+            return JobHandle.CombineDependencies(jobsAfterSkinning);
         }
 
         public JobHandle StartProxyJobsParallel(JobHandle dependsOn)
         {
-            int count = 0;
-            for (int i = 0; i < proxyJob.Length; i++)
-                if (proxyJob[i].type == JobType.Parallel)
-                    count++;
-            if (count == 0)
-                return dependsOn;
-            NativeArray<JobHandle> jobs = new NativeArray<JobHandle>(count, Allocator.TempJob);
             int index = 0;
             for (int i = 0; i < proxyJob.Length; i++)
             {
                 if (proxyJob[i].type == JobType.Parallel)
                 {
-                    jobs[index] = proxyJob[i].StartJob(dependsOn);
+                    jobsParallel[index] = proxyJob[i].StartJob(dependsOn);
                     index++;
                 }
             }
-            return jobs.Dispose(JobHandle.CombineDependencies(jobs));
+            return JobHandle.CombineDependencies(jobsParallel);
         }
 
         public JobHandle StartProxyJobs(JobHandle dependsOn)

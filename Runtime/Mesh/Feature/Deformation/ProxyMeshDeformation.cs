@@ -100,8 +100,8 @@ namespace Proxy.Mesh
                             continue;
                         dependsOn = new WDeformJob
                         {
-                            localToWorldMatrix = proxy.transform.localToWorldMatrix,
-                            worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
+                            localToWorldMatrix = proxy.localToWorldMatrix,
+                            worldToLocalMatrix = proxy.worldToLocalMatrix,
                             deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
                             deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                             maxDeformation = proxy.skeletonGroups.roots[i].maxDeformation,
@@ -116,11 +116,12 @@ namespace Proxy.Mesh
                             animatedVertices = proxy.animatedVertices,
                             animatedNormals = proxy.animatedNormals,
                             updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
+                            updateIndicesList = proxy.normalsRecalculation.updateIndicesList.AsParallelWriter(),
                         }.Schedule(proxy.skeletonGroups.indices[i].Length, Mathf.Max(1, proxy.skeletonGroups.indices[i].Length / 1000), dependsOn);
                     }
                     dependsOn = new MultiBoundsIntersect
                     {
-                        localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                        localToWorldMatrix = proxy.localToWorldMatrix,
                         bounds = proxy.skeletonGroups.bounds,
                         deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
                         deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
@@ -131,7 +132,7 @@ namespace Proxy.Mesh
                 {
                     dependsOn = new BoundsIntersect
                     {
-                        localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                        localToWorldMatrix = proxy.localToWorldMatrix,
                         boundsMax = proxy.boundsMax,
                         boundsMin = proxy.boundsMin,
                         deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
@@ -140,8 +141,8 @@ namespace Proxy.Mesh
                     {
                         dependsOn = new DeformJob
                         {
-                            localToWorldMatrix = proxy.transform.localToWorldMatrix,
-                            worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
+                            localToWorldMatrix = proxy.localToWorldMatrix,
+                            worldToLocalMatrix = proxy.worldToLocalMatrix,
                             deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
                             deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                             extrusionRadius = extrusionRadius,
@@ -154,6 +155,7 @@ namespace Proxy.Mesh
                             animatedNormals = proxy.animatedNormals,
                             deformVector = addedDeformation,
                             updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
+                            updateIndicesList = proxy.normalsRecalculation.updateIndicesList.AsParallelWriter(),
                             maxDeformation = float.MaxValue,
                         }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
                     }
@@ -168,7 +170,7 @@ namespace Proxy.Mesh
                         indices = proxy.normalsRecalculation.updateIndices.AsReadOnly(),
                         vertices = proxy.animatedVertices,
                         normals = proxy.animatedNormals,
-                        localToWorldMatrix = proxy.transform.localToWorldMatrix
+                        localToWorldMatrix = proxy.localToWorldMatrix
                     }.Schedule(colliders.Length, 8, dependsOn);
                 }
             }
@@ -331,6 +333,7 @@ namespace Proxy.Mesh
             [NativeDisableParallelForRestriction] public NativeArray<float4> deformVector;
             [ReadOnly] public NativeArray<float3> animatedNormals;
             [WriteOnly] public NativeParallelHashSet<int>.ParallelWriter updateIndices;
+            [WriteOnly] public NativeList<int>.ParallelWriter updateIndicesList;
             public void Execute(int vertexIndex)
             {
                 if (vertexIndex < 0 || vertexIndex >= animatedVertices.Length)
@@ -356,7 +359,8 @@ namespace Proxy.Mesh
                 if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex].xyz))
                 {
                     if(maxDeformation > 0)
-                        updateIndices.Add(vertexIndex);
+                        if (updateIndices.Add(vertexIndex))
+                            updateIndicesList.AddNoResize(vertexIndex);
                     deformVector[vertexIndex] = new float4(math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement), maxDeformation);
                     worldVertex += deformVector[vertexIndex].xyz;
                     if(applyDeformaion)
@@ -364,7 +368,8 @@ namespace Proxy.Mesh
                 }
                 else if (math.length(deformVector[vertexIndex].xyz) > 0)
                 {
-                    updateIndices.Add(vertexIndex);
+                    if (updateIndices.Add(vertexIndex))
+                        updateIndicesList.AddNoResize(vertexIndex);
                     worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
                         animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);
@@ -452,6 +457,7 @@ namespace Proxy.Mesh
             [ReadOnly] public NativeArray<float3> animatedNormals;
             [ReadOnly] public NativeArray<int> indices;
             [WriteOnly] public NativeParallelHashSet<int>.ParallelWriter updateIndices;
+            [WriteOnly] public NativeList<int>.ParallelWriter updateIndicesList;
             public void Execute(int index)
             {
                 int vertexIndex = indices[index];
@@ -478,8 +484,9 @@ namespace Proxy.Mesh
 
                 if (math.length(totalDisplacement) > math.length(deformVector[vertexIndex].xyz))
                 {
-                    if(maxDeformation > 0)
-                        updateIndices.Add(vertexIndex);
+                    if (maxDeformation > 0)
+                        if (updateIndices.Add(vertexIndex))
+                            updateIndicesList.AddNoResize(vertexIndex);
                     deformVector[vertexIndex] = new float4(math.min(math.length(totalDisplacement), maxDeformation) * math.normalize(totalDisplacement), maxDeformation);
                     worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
@@ -487,7 +494,8 @@ namespace Proxy.Mesh
                 }
                 else if (math.length(deformVector[vertexIndex].xyz) > 0)
                 {
-                    updateIndices.Add(vertexIndex);
+                    if (updateIndices.Add(vertexIndex))
+                        updateIndicesList.AddNoResize(vertexIndex);
                     worldVertex += deformVector[vertexIndex].xyz;
                     if (applyDeformaion)
                         animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);

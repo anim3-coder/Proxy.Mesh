@@ -19,9 +19,11 @@ namespace Proxy.Mesh
         {
             new ColliderManager(),
             new MeshManager(),
+            new TransformManager(),
         };
         public static MeshManager MeshManager => managers[1] as MeshManager;
         public static ColliderManager ColliderManager => managers[0] as ColliderManager;
+        public static TransformManager TransformManager => managers[2] as TransformManager;
 
         public static event Action OnCompleteJob;
 

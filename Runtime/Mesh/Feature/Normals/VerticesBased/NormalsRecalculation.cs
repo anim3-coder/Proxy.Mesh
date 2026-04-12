@@ -134,8 +134,8 @@ namespace Proxy.Mesh
                     additionalDeform = additiveDeformation,
                     lastNormals = previousNormals,
                     normals = proxy.animatedNormals,
-                    updateIndices = updateIndices.AsReadOnly(),
-                }.Schedule(dependsOn);
+                    updateIndices = updateIndicesList,
+                }.Schedule(updateIndicesList, 128,dependsOn);
             }
 
             return dependsOn;
@@ -166,21 +166,20 @@ namespace Proxy.Mesh
     }
 
     [BurstCompile]
-    public struct AfterUpdateNormalsWithDeformVector : IJob
+    public struct AfterUpdateNormalsWithDeformVector : IJobParallelForDefer
     {
         public NativeArray<float3> normals;
         [ReadOnly] public NativeArray<float3> lastNormals;
         [ReadOnly] public NativeArray<float4> addedDeform;
         [ReadOnly] public NativeArray<float4> additionalDeform;
-        [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
-        public void Execute()
+        [ReadOnly] public NativeList<int> updateIndices;
+        public void Execute(int i)
         {
-            foreach (var i in updateIndices)
-            {
-                normals[i] = NormalSlerp(math.normalizesafe(lastNormals[i]), 
-                                         math.normalizesafe(normals[i]), 
-                                         math.clamp(GetWeight(i), 0, 1));
-            }
+            i = updateIndices[i];
+            normals[i] = NormalSlerp(math.normalizesafe(lastNormals[i]),
+                                     math.normalizesafe(normals[i]),
+                                     math.clamp(GetWeight(i), 0, 1));
+
         }
 
         public float GetWeight(int i)

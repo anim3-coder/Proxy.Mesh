@@ -1,11 +1,5 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
-using Unity.Collections;
-using Unity.Jobs;
-using UnityEngine;
-using Unity.Burst;
-using Unity.Mathematics;
-
 namespace Proxy.Mesh
 {
     using Unity.Burst;
@@ -13,7 +7,7 @@ namespace Proxy.Mesh
     using Unity.Jobs;
     using Unity.Mathematics;
     using UnityEngine;
-    using UnityEngine.Jobs; // для TransformAccessArray
+    using UnityEngine.Jobs;
 
     public class ColliderManager : IManager
     {
@@ -61,6 +55,10 @@ namespace Proxy.Mesh
             indicesCache.Clear();
 
             colliders.Clear();
+            dirty.Clear();
+
+            colliders = null;
+            dirty = null;
         }
 
         public void Registration(ProxyCollider collider)
@@ -85,6 +83,9 @@ namespace Proxy.Mesh
 
         public void Remove(ProxyCollider collider)
         {
+            if (colliders == null)
+                return;
+
             int id = collider.GetInstanceID();
             if (!colliders.ContainsKey(id)) return;
 
@@ -119,10 +120,12 @@ namespace Proxy.Mesh
 
         public JobHandle StartJob(JobHandle dependsOn)
         {
+            if (colliders == null)
+                return dependsOn;
             return new UpdateDataJob
             {
                 rawData = rawData.AsArray(),
-                colliderData = colliderData.AsArray().Reinterpret<DeformInfo>()
+                colliderData = colliderData.AsArray()
             }.Schedule(transformAccessArray, dependsOn);
         }
 
@@ -135,6 +138,8 @@ namespace Proxy.Mesh
 
         public void Update()
         {
+            if (colliders == null)
+                return;
             if (ProxyManager.jobCompleted)
             {
                 foreach (int id in dirty)

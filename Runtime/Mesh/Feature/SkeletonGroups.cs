@@ -166,7 +166,7 @@ namespace Proxy.Mesh
                 dependsOn = new DrawBoundsJob()
                 {
                     color = Color.aliceBlue,
-                    localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                    localToWorldMatrix = proxy.localToWorldMatrix,
                     bounds = bounds,
                 }.Schedule(dependsOn);
             }
@@ -197,7 +197,7 @@ namespace Proxy.Mesh
             return new DrawJob()
             {
                 color = roots[i].color,
-                localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                localToWorldMatrix = proxy.localToWorldMatrix,
                 position = proxy.transform.position,
                 vertices = proxy.animatedVertices,
                 indices = indicesSet[i],

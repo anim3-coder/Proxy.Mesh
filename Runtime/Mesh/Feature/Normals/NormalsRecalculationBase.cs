@@ -1,5 +1,6 @@
 ﻿using JetBrains.Annotations;
 using Proxy.Mesh;
+using System;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -13,6 +14,7 @@ namespace Proxy.Mesh
     {
         [field: SerializeField] public bool IsDrawNormals { get; private set; }
         public NativeParallelHashSet<int> updateIndices { get; private set; }
+        public NativeList<int> updateIndicesList { get; private set; }
         protected int vertexCount => proxy.vertexCount;
 
         public override bool IsInit
@@ -39,6 +41,7 @@ namespace Proxy.Mesh
 
             deformationMaps = proxy.Get<IDeformationMaps>();
             deformaionsComponent = proxy.Get<IDeformaion>();
+            updateIndicesList = new NativeList<int>(vertexCount, Allocator.Persistent);
             updateIndices = new NativeParallelHashSet<int>(vertexCount, Allocator.Persistent);
             additiveDeformation = new NativeArray<float4>(vertexCount, Allocator.Persistent);
             addedDeformation = new NativeArray<float4>(vertexCount, Allocator.Persistent);
@@ -47,6 +50,7 @@ namespace Proxy.Mesh
 
         public override void OnShutdown(ProxyMeshAbstract proxyMesh)
         {
+            if (updateIndicesList.IsCreated) updateIndicesList.Dispose();
             if (updateIndices.IsCreated) updateIndices.Dispose();
             if (additiveDeformation.IsCreated) additiveDeformation.Dispose();
             if (addedDeformation.IsCreated) addedDeformation.Dispose();
@@ -73,7 +77,8 @@ namespace Proxy.Mesh
                                 textureSize = deformationMaps[i].deformationMaps[x].textureSize,
                                 triangles = deformationMaps[i].deformationMaps[x].triangles,
                                 uvs = proxy.nativeUV,
-                                updateIndices = updateIndices.AsParallelWriter()
+                                updateIndices = updateIndices.AsParallelWriter(),
+                                updateIndicesList = updateIndicesList.AsParallelWriter(),
                             }.Schedule(proxy.triangles.Length, 32,dependsOn);
                         }
                     }
@@ -88,7 +93,8 @@ namespace Proxy.Mesh
                     {
                         input = deformaionsComponent[i].addedDeformation,
                         output = addedDeformation,
-                    }.Schedule(vertexCount, 32, dependsOn);
+                        indices = updateIndicesList,
+                    }.Schedule(updateIndicesList, 32, dependsOn);
                 }
             }
 
@@ -98,17 +104,18 @@ namespace Proxy.Mesh
             {
                 dependsOn = new DrawNormals()
                 {
-                    localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                    localToWorldMatrix = proxy.localToWorldMatrix,
                     normals = proxy.animatedNormals,
                     vertices = proxy.animatedVertices,
                     additionalDeformation = additiveDeformation,
-                    updateIndices = updateIndices.AsReadOnly()
-                }.Schedule(dependsOn);
+                    indices = updateIndicesList,
+                }.Schedule(updateIndicesList, 64,dependsOn);
             }
 
             dependsOn = new Clear()
             {
                 updateIndices = updateIndices,
+                updateIndicesList = updateIndicesList,
             }.Schedule(dependsOn);
 
             return base.StartJob(dependsOn);
@@ -120,13 +127,14 @@ namespace Proxy.Mesh
         }
 
         [BurstCompile]
-        public struct UpdateDeformationJob : IJobParallelFor
+        public struct UpdateDeformationJob : IJobParallelForDefer
         {
             [ReadOnly] public NativeArray<float4> input;
             [NativeDisableParallelForRestriction] public NativeArray<float4> output;
-
+            [ReadOnly] public NativeList<int> indices;
             public void Execute(int index)
             {
+                index = indices[index];
                 output[index] += new float4(input[index].xyz, math.max(input[index].w, output[index].w));
             }
         }
@@ -140,6 +148,7 @@ namespace Proxy.Mesh
             [ReadOnly] public NativeArray<float2> uvs;
             [ReadOnly] public int textureSize;
             [WriteOnly] public NativeParallelHashSet<int>.ParallelWriter updateIndices;
+            [WriteOnly] public NativeList<int>.ParallelWriter updateIndicesList;
             public void Execute(int i)
             {
                 Update(triangles[i].x);
@@ -158,7 +167,8 @@ namespace Proxy.Mesh
 
                 deformation[index] = imagedeformation[idx];
                 if (math.length(imagedeformation[idx]) > 0)
-                    updateIndices.Add(index);
+                    if (updateIndices.Add(index))
+                        updateIndicesList.AddNoResize(index);
             }
         }
 
@@ -166,26 +176,26 @@ namespace Proxy.Mesh
         public struct Clear : IJob
         {
             public NativeParallelHashSet<int> updateIndices;
+            public NativeList<int> updateIndicesList;
             public void Execute()
             {
                 updateIndices.Clear();
+                updateIndicesList.Clear();
             }
         }
 
         [BurstCompile]
-        public struct DrawNormals : IJob
+        public struct DrawNormals : IJobParallelForDefer
         {
             [ReadOnly] public NativeArray<float3> vertices;
             [ReadOnly] public NativeArray<float3> normals;
             [ReadOnly] public float4x4 localToWorldMatrix;
-            [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
-            [ReadOnly] public NativeArray<float4> additionalDeformation; 
-            public void Execute()
+            [ReadOnly] public NativeArray<float4> additionalDeformation;
+            [ReadOnly] public NativeList<int> indices;
+            public void Execute(int i)
             {
-                foreach (var i in updateIndices)
-                {
-                    D.raw(new Shape.Line(math.transform(localToWorldMatrix, vertices[i]) + additionalDeformation[i].xyz, math.transform(localToWorldMatrix, vertices[i]) + (0.01f * math.rotate(localToWorldMatrix, math.normalize(normals[i]))) + additionalDeformation[i].xyz), color: Color.red);
-                }
+                i = indices[i];
+                D.raw(new Shape.Line(math.transform(localToWorldMatrix, vertices[i]) + additionalDeformation[i].xyz, math.transform(localToWorldMatrix, vertices[i]) + (0.01f * math.rotate(localToWorldMatrix, math.normalize(normals[i]))) + additionalDeformation[i].xyz), color: Color.red);
             }
         }
     }

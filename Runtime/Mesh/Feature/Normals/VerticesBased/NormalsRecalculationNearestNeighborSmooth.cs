@@ -33,7 +33,6 @@ namespace Proxy.Mesh.Normals
 
         public override JobHandle StartJob(JobHandle dependsOn)
         {
-            int t = proxy.triangles.Length / 3;
             for (int i = 0; i < accuracy; i++)
             {
                 dependsOn = new ReadWrite()
@@ -50,14 +49,14 @@ namespace Proxy.Mesh.Normals
                     neighbourStartOffsets = neighbourStartOffsets,
                     vertexCount = proxy.vertexCount,
                     accuracy = accuracy,
-                    updateIndices = proxy.normalsRecalculation.updateIndices.AsReadOnly(),
-                }.Schedule(dependsOn);
+                    updateIndices = proxy.normalsRecalculation.updateIndicesList,
+                }.Schedule(proxy.normalsRecalculation.updateIndicesList, 32, dependsOn);
             }
             return dependsOn;
         }
 
         [BurstCompile]
-        public struct SmoothNormalsJob : IJob
+        public struct SmoothNormalsJob : IJobParallelForDefer
         {
             [ReadOnly] public NativeArray<float3> inputNormals;
             [NativeDisableParallelForRestriction] public NativeArray<float3> outputNormals;
@@ -66,34 +65,33 @@ namespace Proxy.Mesh.Normals
             [ReadOnly] public NativeArray<int> neighbourIndices;
             [ReadOnly] public NativeArray<int> neighbourStartOffsets;
             [ReadOnly] public int vertexCount;
-            [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
+            [ReadOnly] public NativeList<int> updateIndices;
 
-            public void Execute()
+            public void Execute(int i)
             {
-                foreach (int i in updateIndices)
+                i = updateIndices[i];
+                float3 current = inputNormals[i];
+                int neighbourCount = neighbourCounts[i];
+
+                if (neighbourCount == 0)
                 {
-                    float3 current = inputNormals[i];
-                    int neighbourCount = neighbourCounts[i];
-
-                    if (neighbourCount == 0)
-                    {
-                        outputNormals[i] = current;
-                        continue;
-                    }
-
-                    float3 sum = current;
-                    int start = neighbourStartOffsets[i];
-
-                    for (int j = 0; j < neighbourCount; ++j)
-                    {
-                        int nb = neighbourIndices[start + j];
-                        float3 nbNormal = inputNormals[nb];
-                        float cosAngle = math.dot(current, nbNormal);
-                        sum = NormalSlerp(math.normalizesafe(nbNormal), math.normalizesafe(sum), 0.5f);
-                    }
-
-                    outputNormals[i] = sum;
+                    outputNormals[i] = current;
+                    return;
                 }
+
+                float3 sum = current;
+                int start = neighbourStartOffsets[i];
+
+                for (int j = 0; j < neighbourCount; ++j)
+                {
+                    int nb = neighbourIndices[start + j];
+                    float3 nbNormal = inputNormals[nb];
+                    float cosAngle = math.dot(current, nbNormal);
+                    sum = NormalSlerp(math.normalizesafe(nbNormal), math.normalizesafe(sum), 0.5f);
+                }
+
+                outputNormals[i] = sum;
+
             }
 
             public static float3 NormalSlerp(float3 a, float3 b, float t)

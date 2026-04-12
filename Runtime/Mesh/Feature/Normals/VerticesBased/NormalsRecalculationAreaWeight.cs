@@ -24,8 +24,8 @@ namespace Proxy.Mesh.Normals
                 {
                     normals = proxy.animatedNormals,
                     previousNormals = proxy.normalsRecalculation.previousNormals,
-                    updateIndices = proxy.normalsRecalculation.updateIndices.AsReadOnly(),
-                }.Schedule(dependsOn);
+                    updateIndices = proxy.normalsRecalculation.updateIndicesList,
+                }.Schedule(proxy.normalsRecalculation.updateIndicesList, 64, dependsOn);
             }
             JobHandle RecalculateNormals()
             {
@@ -35,7 +35,7 @@ namespace Proxy.Mesh.Normals
                     vertices = proxy.animatedVertices,
                     normals = proxy.animatedNormals,
                     triangles = proxy.triangles,
-                    worldToLocalMatrix = proxy.transform.worldToLocalMatrix,
+                    worldToLocalMatrix = proxy.worldToLocalMatrix,
                     additionalDeformation = proxy.normalsRecalculation.additiveDeformation,
                     updateIndices = proxy.normalsRecalculation.updateIndices.AsReadOnly()
                 }.Schedule(proxy.triangles.Length, 32, dependsOn);
@@ -44,18 +44,16 @@ namespace Proxy.Mesh.Normals
     }
 
     [BurstCompile]
-    public struct ClearNormalsJob : IJob
+    public struct ClearNormalsJob : IJobParallelForDefer
     {
         public NativeArray<float3> normals;
         [WriteOnly] public NativeArray<float3> previousNormals;
-        [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
-        public void Execute()
+        [ReadOnly] public NativeList<int> updateIndices;
+        public void Execute(int i)
         {
-            foreach (var i in updateIndices)
-            {
-                previousNormals[i] = normals[i];
-                normals[i] = float3.zero;
-            }
+            i = updateIndices[i];
+            previousNormals[i] = normals[i];
+            normals[i] = float3.zero;
         }
     }
 

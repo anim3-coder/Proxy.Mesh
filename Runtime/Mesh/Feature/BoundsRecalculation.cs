@@ -63,7 +63,7 @@ namespace Proxy.Mesh
                     boundsMin = proxy.boundsMin,
                     boundsMax = proxy.boundsMax,
                     color = Color.aliceBlue,
-                    localToWorldMatrix = proxy.transform.localToWorldMatrix,
+                    localToWorldMatrix = proxy.localToWorldMatrix,
                 }.Schedule(dependsOn);
             }   
             return dependsOn;
