@@ -202,9 +202,8 @@ namespace Proxy.Mesh
             public void Execute(int index, TransformAccess transform)
             {
                 var raw = rawData[index];
-                // Доступ к матрице и масштабу через TransformAccess (быстро и Burst-совместимо)
-                float3 scale = transform.localScale;
                 float4x4 localToWorld = transform.localToWorldMatrix;
+                float3 scale = GetLossyScaleFromMatrix(localToWorld);
 
                 colliderData[index] = new DeformInfo
                 {
@@ -214,6 +213,15 @@ namespace Proxy.Mesh
                     IsUpdate = colliderData[index].IsUpdate,
                     IsValid = colliderData[index].IsValid,
                 };
+            }
+
+            private float3 GetLossyScaleFromMatrix(in float4x4 m)
+            {
+                return new float3(
+                    math.length(m.c0.xyz),
+                    math.length(m.c1.xyz),
+                    math.length(m.c2.xyz)
+                );
             }
         }
     }

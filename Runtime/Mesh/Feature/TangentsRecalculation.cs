@@ -1,10 +1,8 @@
 ﻿using System;
-using System.Collections;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace Proxy.Mesh
 {
@@ -68,8 +66,8 @@ namespace Proxy.Mesh
                     {
                         tangentsAcc = tangentsAccumulate,
                         bitangentsAcc = bitangentsAccumulate,
-                        updateIndices = proxyMesh.normalsRecalculation.updateIndices.AsReadOnly(),
-                    }.Schedule(dependsOn);
+                        updateIndices = proxyMesh.normalsRecalculation.updateIndicesList,
+                    }.Schedule(proxyMesh.normalsRecalculation.updateIndicesList, 128,dependsOn);
 
                     dependsOn = new AccumulateTangentsJob()
                     {
@@ -86,17 +84,17 @@ namespace Proxy.Mesh
                         normals = proxyMesh.animatedNormals,
                         tangentsAcc = tangentsAccumulate,
                         bitangentsAcc = bitangentsAccumulate,
-                        updateIndices = proxyMesh.normalsRecalculation.updateIndices.AsReadOnly(),
+                        updateIndices = proxyMesh.normalsRecalculation.updateIndicesList,
                         animatedTangents = proxyMesh.animatedTangents,
                         value = value
-                    }.Schedule(dependsOn);
+                    }.Schedule(proxyMesh.normalsRecalculation.updateIndicesList, 128, dependsOn);
                     break;
                 case Mode.Simple:
                     dependsOn = new TangensJobs.Simple.ClearTangentsJob()
                     {
                         tangents = proxyMesh.animatedTangents,
-                        updateIndices = proxyMesh.normalsRecalculation.updateIndices.AsReadOnly(),
-                    }.Schedule(dependsOn);
+                        updateIndices = proxyMesh.normalsRecalculation.updateIndicesList,
+                    }.Schedule(proxyMesh.normalsRecalculation.updateIndicesList, 128, dependsOn);
                     
                     dependsOn = new RecalculateTangentsJob()
                     {
@@ -111,8 +109,8 @@ namespace Proxy.Mesh
                     dependsOn = new NormalizeTangentsJob()
                     {
                         tangents = proxyMesh.animatedTangents,
-                        updateIndices = proxyMesh.normalsRecalculation.updateIndices.AsReadOnly(),
-                    }.Schedule(dependsOn);
+                        updateIndices = proxyMesh.normalsRecalculation.updateIndicesList,
+                    }.Schedule(proxyMesh.normalsRecalculation.updateIndicesList, 128, dependsOn);
                     break;
             }
             return dependsOn;
@@ -129,14 +127,14 @@ namespace Proxy.Mesh
         namespace Simple
         {
             [BurstCompile]
-            public struct ClearTangentsJob : IJob
+            public struct ClearTangentsJob : IJobParallelForDefer
             {
                 [WriteOnly] public NativeArray<float4> tangents;
-                [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
-                public void Execute()
+                [ReadOnly] public NativeList<int> updateIndices;
+                public void Execute(int i)
                 {
-                    foreach (var i in updateIndices)
-                        tangents[i] = float4.zero;
+                    i = updateIndices[i];
+                    tangents[i] = float4.zero;
                 }
             }
 
@@ -199,25 +197,23 @@ namespace Proxy.Mesh
             }
 
             [BurstCompile]
-            public struct NormalizeTangentsJob : IJob
+            public struct NormalizeTangentsJob : IJobParallelForDefer
             {
                 [NativeDisableParallelForRestriction] public NativeArray<float4> tangents;
-                [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
-                public void Execute()
+                [ReadOnly] public NativeList<int> updateIndices;
+                public void Execute(int i)
                 {
-                    foreach (int i in updateIndices)
+                    i = updateIndices[i];
+                    float4 t = tangents[i];
+                    if (math.lengthsq(t.xyz) > 1e-8f)
                     {
-                        float4 t = tangents[i];
-                        if (math.lengthsq(t.xyz) > 1e-8f)
-                        {
-                            t.xyz = math.normalize(t.xyz);
-                            // Сохраняем знак w (можно взять знак суммы, но для простоты оставляем как есть)
-                            tangents[i] = new float4(t.xyz, math.sign(t.w));
-                        }
-                        else
-                        {
-                            tangents[i] = new float4(1, 0, 0, 1);
-                        }
+                        t.xyz = math.normalize(t.xyz);
+                        // Сохраняем знак w (можно взять знак суммы, но для простоты оставляем как есть)
+                        tangents[i] = new float4(t.xyz, math.sign(t.w));
+                    }
+                    else
+                    {
+                        tangents[i] = new float4(1, 0, 0, 1);
                     }
                 }
             }
@@ -226,19 +222,17 @@ namespace Proxy.Mesh
         namespace Mikktspace
         {
             [BurstCompile]
-            public struct ClearTangentsJob : IJob
+            public struct ClearTangentsJob : IJobParallelForDefer
             {
                 [WriteOnly] public NativeArray<float3> tangentsAcc;
                 [WriteOnly] public NativeArray<float3> bitangentsAcc;
-                [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
+                [ReadOnly] public NativeList<int> updateIndices;
 
-                public void Execute()
+                public void Execute(int i)
                 {
-                    foreach (var i in updateIndices)
-                    {
-                        tangentsAcc[i] = float3.zero;
-                        bitangentsAcc[i] = float3.zero;
-                    }
+                    i = updateIndices[i];
+                    tangentsAcc[i] = float3.zero;
+                    bitangentsAcc[i] = float3.zero;
                 }
             }
 
@@ -296,29 +290,27 @@ namespace Proxy.Mesh
             }
 
             [BurstCompile]
-            public struct FinalizeTangentsJob : IJob
+            public struct FinalizeTangentsJob : IJobParallelForDefer
             {
                 [ReadOnly] public NativeArray<float3> normals;
                 [ReadOnly] public NativeArray<float3> tangentsAcc;
                 [ReadOnly] public NativeArray<float3> bitangentsAcc;
-                [ReadOnly] public NativeParallelHashSet<int>.ReadOnly updateIndices;
+                [ReadOnly] public NativeList<int> updateIndices;
                 [ReadOnly] public float4 value;
                 [WriteOnly] public NativeArray<float4> animatedTangents;
 
-                public void Execute()
+                public void Execute(int vertexIndex)
                 {
-                    foreach (int vertexIndex in updateIndices)
-                    {
-                        float3 n = math.normalize(normals[vertexIndex]);
-                        float3 t = tangentsAcc[vertexIndex];
-                        float3 b = bitangentsAcc[vertexIndex];
+                    vertexIndex = updateIndices[vertexIndex];
+                    float3 n = math.normalize(normals[vertexIndex]);
+                    float3 t = tangentsAcc[vertexIndex];
+                    float3 b = bitangentsAcc[vertexIndex];
 
-                        float3 tangent = math.normalize(t - n * math.dot(n, t));
-                        float handedness = math.dot(math.cross(n, tangent), b) < 0 ? -1f : 1f;
+                    float3 tangent = math.normalize(t - n * math.dot(n, t));
+                    float handedness = math.dot(math.cross(n, tangent), b) < 0 ? -1f : 1f;
 
-                        animatedTangents[vertexIndex] = new float4(tangent, handedness);
-                        animatedTangents[vertexIndex] = value;
-                    }
+                    animatedTangents[vertexIndex] = new float4(tangent, handedness);
+                    animatedTangents[vertexIndex] = value;
                 }
             }
         }

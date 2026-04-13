@@ -52,7 +52,6 @@ namespace Proxy.Mesh
             }
         }
         #endregion
-        [TriInspector.ShowInInspector, TriInspector.ReadOnly]public int activeCount { get; protected set; }
         public bool IsExtrusion
         {
             get => extrusionType != ExtrusionType.None; 
@@ -97,27 +96,44 @@ namespace Proxy.Mesh
                     for(int i = 0; i < proxy.skeletonGroups.groupsCount; i++)
                     {
                         if (intersects.IsSet(i) == false || proxy.skeletonGroups.roots[i].maxDeformation <= 0)
-                            continue;
-                        dependsOn = new WDeformJob
                         {
-                            localToWorldMatrix = proxy.localToWorldMatrix,
-                            worldToLocalMatrix = proxy.worldToLocalMatrix,
-                            deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
-                            deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
-                            maxDeformation = proxy.skeletonGroups.roots[i].maxDeformation,
-                            indices = proxy.skeletonGroups.indices[i],
-                            extrusionRadius = extrusionRadius,
-                            extrusionSmooth = extrusionSmooth,
-                            deformationType = deformationType,
-                            extrusionType = extrusionType,
-                            deformVector = addedDeformation,
-                            damping = damping,
-                            applyDeformaion = applyDeformation,
-                            animatedVertices = proxy.animatedVertices,
-                            animatedNormals = proxy.animatedNormals,
-                            updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
-                            updateIndicesList = proxy.normalsRecalculation.updateIndicesList.AsParallelWriter(),
-                        }.Schedule(proxy.skeletonGroups.indices[i].Length, Mathf.Max(1, proxy.skeletonGroups.indices[i].Length / 1000), dependsOn);
+                            dependsOn = new WAfterDeformUpdate
+                            {
+                                damping = damping,
+                                maxDeformation = proxy.skeletonGroups.roots[i].maxDeformation,
+                                deformVector = addedDeformation,
+                                animatedVertices = proxy.animatedVertices,
+                                localToWorldMatrix = proxy.localToWorldMatrix,
+                                worldToLocalMatrix = proxy.worldToLocalMatrix,
+                                applyDeformaion = applyDeformation,
+                                indices = proxy.skeletonGroups.indices[i],
+                                updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
+                                updateIndicesList = proxy.normalsRecalculation.updateIndicesList.AsParallelWriter(),
+                            }.Schedule(proxy.skeletonGroups.indices[i].Length, 64, dependsOn);
+                        }
+                        else
+                        {
+                            dependsOn = new WDeformJob
+                            {
+                                localToWorldMatrix = proxy.localToWorldMatrix,
+                                worldToLocalMatrix = proxy.worldToLocalMatrix,
+                                deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
+                                deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
+                                maxDeformation = proxy.skeletonGroups.roots[i].maxDeformation,
+                                indices = proxy.skeletonGroups.indices[i],
+                                extrusionRadius = extrusionRadius,
+                                extrusionSmooth = extrusionSmooth,
+                                deformationType = deformationType,
+                                extrusionType = extrusionType,
+                                deformVector = addedDeformation,
+                                damping = damping,
+                                applyDeformaion = applyDeformation,
+                                animatedVertices = proxy.animatedVertices,
+                                animatedNormals = proxy.animatedNormals,
+                                updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
+                                updateIndicesList = proxy.normalsRecalculation.updateIndicesList.AsParallelWriter(),
+                            }.Schedule(proxy.skeletonGroups.indices[i].Length, 64, dependsOn);
+                        }
                     }
                     dependsOn = new MultiBoundsIntersect
                     {
@@ -133,11 +149,12 @@ namespace Proxy.Mesh
                     dependsOn = new BoundsIntersect
                     {
                         localToWorldMatrix = proxy.localToWorldMatrix,
+                        deformIndices = ProxyManager.ColliderManager.GetIndicesCached(colliders),
                         boundsMax = proxy.boundsMax,
                         boundsMin = proxy.boundsMin,
                         deformInfos = ProxyManager.ColliderManager.colliderData.AsArray(),
                     }.Schedule(dependsOn);
-                    if (activeCount > 0)
+                    if (AnyValid())
                     {
                         dependsOn = new DeformJob
                         {
@@ -157,7 +174,7 @@ namespace Proxy.Mesh
                             updateIndices = proxy.normalsRecalculation.updateIndices.AsParallelWriter(),
                             updateIndicesList = proxy.normalsRecalculation.updateIndicesList.AsParallelWriter(),
                             maxDeformation = float.MaxValue,
-                        }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                        }.Schedule(proxy.vertexCount, 64, dependsOn);
                     }
                 }
                 if(calculatePenetration)
@@ -171,20 +188,20 @@ namespace Proxy.Mesh
                         vertices = proxy.animatedVertices,
                         normals = proxy.animatedNormals,
                         localToWorldMatrix = proxy.localToWorldMatrix
-                    }.Schedule(colliders.Length, 8, dependsOn);
+                    }.Schedule(colliders.Length, 64, dependsOn);
                 }
             }
             return dependsOn;
         }
 
-        public JobHandle MultiPass(JobHandle dependsOn, int length, System.Func<int, JobHandle, JobHandle> Action)
+        private bool AnyValid()
         {
-            NativeArray<JobHandle> jobs = new NativeArray<JobHandle>(length, Allocator.TempJob);
-            for (int i = 0; i < length; i++)
+            foreach(int index in ProxyManager.ColliderManager.GetIndicesCached(colliders))
             {
-                jobs[i] = Action.Invoke(i, dependsOn);
+                if (ProxyManager.ColliderManager.colliderData[index].IsValid)
+                    return true;
             }
-            return jobs.Dispose(JobHandle.CombineDependencies(jobs));
+            return false;
         }
 
         [System.Serializable]
@@ -199,6 +216,34 @@ namespace Proxy.Mesh
             Realistic, ByNormal, Hybrid
         }
 
+        [BurstCompile]
+        protected struct WAfterDeformUpdate : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<int> indices;
+            [NativeDisableParallelForRestriction] public NativeArray<float4> deformVector;
+            [NativeDisableParallelForRestriction] public NativeArray<float3> animatedVertices;
+            [WriteOnly] public NativeParallelHashSet<int>.ParallelWriter updateIndices;
+            [WriteOnly] public NativeList<int>.ParallelWriter updateIndicesList;
+            [ReadOnly] public Matrix4x4 localToWorldMatrix;
+            [ReadOnly] public Matrix4x4 worldToLocalMatrix;
+            [ReadOnly] public bool applyDeformaion;
+            [ReadOnly] public float maxDeformation;
+            [ReadOnly] public float damping;
+            public void Execute(int index)
+            {
+                int vertexIndex = indices[index];
+                float3 worldVertex = localToWorldMatrix.MultiplyPoint3x4(animatedVertices[vertexIndex]);
+                if (math.length(deformVector[vertexIndex].xyz) > 0)
+                {
+                    if (updateIndices.Add(vertexIndex))
+                        updateIndicesList.AddNoResize(vertexIndex);
+                    worldVertex += deformVector[vertexIndex].xyz;
+                    if (applyDeformaion)
+                        animatedVertices[vertexIndex] = worldToLocalMatrix.MultiplyPoint3x4(worldVertex);
+                    deformVector[vertexIndex] = new float4(math.lerp(deformVector[vertexIndex], 0, damping).xyz, maxDeformation);
+                }
+            }
+        }
         [BurstCompile]
         protected struct BoundsIntersect : IJob
         {

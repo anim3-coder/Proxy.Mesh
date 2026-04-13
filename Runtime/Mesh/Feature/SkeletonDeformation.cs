@@ -300,7 +300,7 @@ namespace Proxy.Mesh
                         baseNormals = proxy.nativeBaseNormals,
                         baseVertices = proxy.nativeBaseVertices,
                         baseTangents = proxy.nativeBaseTangents,
-                    }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                    }.Schedule(proxy.vertexCount, 128, dependsOn);
                 }
             }
             return dependsOn;
@@ -324,7 +324,7 @@ namespace Proxy.Mesh
                         animatedVertices = proxy.animatedVertices,
                         animatedNormals = proxy.animatedNormals,
                         animetedTangents = proxy.animatedTangents
-                    }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                    }.Schedule(proxy.vertexCount, 128, dependsOn);
                 case SkeletonDeformationMethod.SIMD:
                     return new SkeletonDeformationSIMD
                     {
@@ -337,7 +337,7 @@ namespace Proxy.Mesh
                         animatedVertices = proxy.animatedVertices,
                         animatedNormals = proxy.animatedNormals,
                         animetedTangents = proxy.animatedTangents
-                    }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                    }.Schedule(proxy.vertexCount, 128, dependsOn);
             }
         }
 
@@ -511,7 +511,7 @@ namespace Proxy.Mesh
                         animatedVertices = proxy.animatedVertices,
                         baseNormals = proxy.nativeBaseNormals,
                         baseVertices = proxy.nativeBaseVertices,
-                    }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                    }.Schedule(proxy.vertexCount, 128, dependsOn);
                 }
             }
             return dependsOn;
@@ -533,7 +533,7 @@ namespace Proxy.Mesh
                         boneMatrices = proxy.boneMatrices,
                         animatedVertices = proxy.animatedVertices,
                         animatedNormals = proxy.animatedNormals,
-                    }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                    }.Schedule(proxy.vertexCount, 128, dependsOn);
                 case SkeletonDeformationMethod.SIMD:
                     return new SkeletonDeformationSIMD
                     {
@@ -544,7 +544,7 @@ namespace Proxy.Mesh
                         boneMatrices = proxy.boneMatrices,
                         animatedVertices = proxy.animatedVertices,
                         animatedNormals = proxy.animatedNormals,
-                    }.Schedule(proxy.vertexCount, Mathf.Max(1, proxy.vertexCount / 100), dependsOn);
+                    }.Schedule(proxy.vertexCount, 128, dependsOn);
             }
         }
 

@@ -141,13 +141,13 @@ namespace Proxy.Mesh
             return dependsOn;
         }
 
-        [System.Serializable]
+        [Serializable]
         public enum NormalsRecalculationMethod
         {
             AreaWeight = 0, AngleWeighted = 2, AreaAndAngleWeight = 3
         }
 
-        [System.Serializable]
+        [Serializable]
         public enum NormalsSmoothingMethod
         {
             None = 0, NearestNeighbor = 1,Laplacian = 2
@@ -187,7 +187,7 @@ namespace Proxy.Mesh
             return math.pow(2, (math.length(addedDeform[i].xyz + additionalDeform[i].xyz) / math.max(additionalDeform[i].w, addedDeform[i].w)) - 1);
         }
 
-        public static float3 NormalSlerp(float3 a, float3 b, float t)
+        public float3 NormalSlerp(float3 a, float3 b, float t)
         {
             quaternion q = Quaternion.FromToRotation(a, b);
             quaternion result = math.slerp(quaternion.identity, q, t);

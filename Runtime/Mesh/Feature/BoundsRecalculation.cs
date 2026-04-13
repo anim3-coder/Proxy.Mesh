@@ -87,14 +87,14 @@ namespace Proxy.Mesh
                         vertices = vertices,
                         boundsMin = boundsMin,
                         boundsMax = boundsMax,
-                    }.Schedule(vertexCount, Mathf.Max(1, vertexCount / 100), dependsOn);
+                    }.Schedule(vertexCount, 128, dependsOn);
                 case BoundsRecalculationMethod.Multithreading:
                     return new CalculateBoundsJobMultithreading()
                     {
                         vertices = vertices,
                         boundsMin = boundsMin,
                         boundsMax = boundsMax,
-                    }.Schedule(vertexCount, Mathf.Max(1, vertexCount / 100), dependsOn);
+                    }.Schedule(vertexCount, 128, dependsOn);
             }
         }
 
@@ -118,7 +118,7 @@ namespace Proxy.Mesh
                         boundsMin = boundsMin,
                         boundsMax = boundsMax,
                         indices = indices,
-                    }.Schedule(indices.Length, Mathf.Max(1, indices.Length / 100), dependsOn);
+                    }.Schedule(indices.Length, 128, dependsOn);
                 case BoundsRecalculationMethod.Multithreading:
                     return new WCalculateBoundsJobMultithreading()
                     {
@@ -126,7 +126,7 @@ namespace Proxy.Mesh
                         boundsMin = boundsMin,
                         boundsMax = boundsMax,
                         indices = indices,
-                    }.Schedule(indices.Length, Mathf.Max(1, indices.Length / 100), dependsOn);
+                    }.Schedule(indices.Length, 128, dependsOn);
             }
         }
 
@@ -136,40 +136,6 @@ namespace Proxy.Mesh
             [ReadOnly] public NativeArray<Bounds> bounds;
             public NativeArray<float> boundsMin;
             public NativeArray<float> boundsMax;
-
-            private void AtomicMin(int component, float value)
-            {
-                unsafe
-                {
-                    float* address = (float*)boundsMin.GetUnsafePtr() + component;
-                    float current;
-                    float newValue;
-                    do
-                    {
-                        current = *address;
-                        newValue = math.min(current, value);
-                        if (newValue >= current) // значение не меньше текущего – выходим
-                            break;
-                    } while (Interlocked.CompareExchange(ref *address, newValue, current) != current);
-                }
-            }
-
-            private void AtomicMax(int component, float value)
-            {
-                unsafe
-                {
-                    float* address = (float*)boundsMax.GetUnsafePtr() + component;
-                    float current;
-                    float newValue;
-                    do
-                    {
-                        current = *address;
-                        newValue = math.max(current, value);
-                        if (newValue <= current) // значение не больше текущего – выходим
-                            break;
-                    } while (Interlocked.CompareExchange(ref *address, newValue, current) != current);
-                }
-            }
 
             public void Execute()
             {

@@ -94,7 +94,7 @@ namespace Proxy.Mesh
                         input = deformaionsComponent[i].addedDeformation,
                         output = addedDeformation,
                         indices = updateIndicesList,
-                    }.Schedule(updateIndicesList, 32, dependsOn);
+                    }.Schedule(updateIndicesList, 128, dependsOn);
                 }
             }
 
